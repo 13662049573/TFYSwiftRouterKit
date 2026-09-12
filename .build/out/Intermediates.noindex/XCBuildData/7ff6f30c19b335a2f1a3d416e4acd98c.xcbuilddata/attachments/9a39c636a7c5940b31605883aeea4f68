@@ -1,4 +1,0 @@
-module TFYSwiftRouterCore {
-header "TFYSwiftRouterCore-Swift.h"
-export *
-}

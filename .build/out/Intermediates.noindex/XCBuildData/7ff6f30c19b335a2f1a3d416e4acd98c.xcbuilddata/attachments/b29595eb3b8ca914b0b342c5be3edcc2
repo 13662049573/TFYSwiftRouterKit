@@ -1,4 +1,0 @@
-module TFYSwiftRouterTesting {
-header "TFYSwiftRouterTesting-Swift.h"
-export *
-}
