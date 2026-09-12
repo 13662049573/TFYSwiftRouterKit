@@ -14,6 +14,12 @@ final class TFYSwiftRouterKitTests: XCTestCase {
     private enum ProductEvent: Sendable, Equatable { case tapped(String) }
     private struct ProductOutput: Sendable, Equatable { let accepted: Bool }
 
+    private struct ContractRoute: Hashable, Sendable, TFYSwiftRouteContract {
+        typealias Input = ProductInput
+        typealias Output = ProductOutput
+        let id: String
+    }
+
     private protocol CartServicing: TFYSwiftComponentService {
         func count() async -> Int
     }
@@ -36,6 +42,14 @@ final class TFYSwiftRouterKitTests: XCTestCase {
         func intercept(_ transaction: TFYSwiftRouteTransaction) async -> TFYSwiftRouteInterceptionResult {
             guard case .legacy(let id)? = transaction.route.cast(to: TestRoute.self) else { return .proceed }
             return .redirect(TFYSwiftAnyRoute(TestRoute.detail(id: id)))
+        }
+    }
+
+    @MainActor
+    private final class RepeatingSuspensionInterceptor: TFYSwiftRouteInterceptor {
+        let identifier = "repeating-suspension"
+        func intercept(_ transaction: TFYSwiftRouteTransaction) async -> TFYSwiftRouteInterceptionResult {
+            .suspend(TFYSwiftRouteSuspension(reason: "repeat") { true })
         }
     }
 
@@ -230,8 +244,8 @@ final class TFYSwiftRouterKitTests: XCTestCase {
         let scoped = TFYSwiftScopedNavigationDriver()
         let homeScope: TFYSwiftNavigationScopeID = "test.home"
         let cartScope: TFYSwiftNavigationScopeID = "test.cart"
-        scoped.register(home, for: homeScope)
-        scoped.register(cart, for: cartScope)
+        try scoped.register(home, for: homeScope, replacingExisting: false)
+        try scoped.register(cart, for: cartScope, replacingExisting: false)
 
         let homeRoute = TFYSwiftAnyRoute(TestRoute.detail(id: "home"))
         let cartRoute = TFYSwiftAnyRoute(TestRoute.detail(id: "cart"))
@@ -267,7 +281,8 @@ final class TFYSwiftRouterKitTests: XCTestCase {
         let coordinator = try TFYSwiftDemoAppCoordinator()
         XCTAssertEqual(coordinator.tabBarController.viewControllers?.count, 4)
         XCTAssertEqual(coordinator.assembly.routes.registeredRouteNames.count, 4)
-        XCTAssertEqual(coordinator.assembly.destinations.registeredDestinationIDs.count, 15)
+        XCTAssertEqual(coordinator.assembly.destinations.registeredDestinationIDs.count, 16)
+        XCTAssertTrue(coordinator.assembly.destinations.contains("home.laboratory"))
         XCTAssertEqual(
             coordinator.tabBarController.viewControllers?.compactMap { $0.tabBarItem.title },
             ["首页", "商品", "购物车", "我的"]
@@ -291,4 +306,206 @@ final class TFYSwiftRouterKitTests: XCTestCase {
             [TFYSwiftAnyRoute(TFYSwiftDemoProfileRoute.root)]
         )
     }
+
+    @MainActor
+    func testCompletedSessionReleasesInteractionCycle() async throws {
+        let driver = Driver()
+        let router = TFYSwiftRouter(driver: driver)
+        try router.registry.register(TestRoute.self) { _, _ in TFYSwiftDestinationDescriptor(identifier: "result") }
+
+        var session: TFYSwiftRouteSession<ProductCommand, ProductEvent, ProductOutput>? = router.openSession(
+            TestRoute.detail(id: "release"),
+            input: ProductInput(id: "release", attributes: [:]),
+            commands: ProductCommand.self,
+            events: ProductEvent.self,
+            expecting: ProductOutput.self
+        )
+        for _ in 0..<10 where driver.interaction == nil { await Task.yield() }
+        weak let weakInteraction = driver.interaction
+        driver.interaction?.result?.finish(with: ProductOutput(accepted: true))
+        _ = try await session?.value
+        driver.interaction = nil
+        session = nil
+        await Task.yield()
+        XCTAssertNil(weakInteraction)
+    }
+
+    @MainActor
+    func testSwiftUIFactoryFailurePropagatesToRouter() async throws {
+        let destinations = TFYSwiftSwiftUIDestinationRegistry()
+        try destinations.register(identifier: "throwing", routeType: TestRoute.self) { _, _ -> Text in
+            throw TFYSwiftRouteError.destinationUnavailable("factory")
+        }
+        let driver = TFYSwiftSwiftUINavigationDriver(destinations: destinations)
+        let registry = TFYSwiftRouteRegistry()
+        try registry.register(TestRoute.self) { _, _ in TFYSwiftDestinationDescriptor(identifier: "throwing") }
+        let router = TFYSwiftRouter(
+            registry: registry,
+            interceptors: TFYSwiftInterceptorPipeline(),
+            events: TFYSwiftRouteEventCenter(),
+            driver: driver
+        )
+
+        await XCTAssertThrowsErrorAsync {
+            try await router.open(TestRoute.detail(id: "factory"))
+        }
+        XCTAssertTrue(driver.path.isEmpty)
+    }
+
+    @MainActor
+    func testAssemblyRegistrationRollsBackWhenDestinationFails() throws {
+        let assembly = TFYSwiftRouterAssembly(navigationController: UINavigationController())
+        try assembly.destinations.register(identifier: "duplicate", routeType: TestRoute.self) { _, _ in UIViewController() }
+
+        XCTAssertThrowsError(try assembly.register(TestRoute.self, destinationID: "duplicate") { _, _ in UIViewController() })
+        XCTAssertFalse(assembly.routes.contains(TestRoute.self))
+    }
+
+    @MainActor
+    func testSuspensionLoopIsBounded() async throws {
+        let driver = Driver()
+        let registry = TFYSwiftRouteRegistry()
+        try registry.register(TestRoute.self) { _, _ in TFYSwiftDestinationDescriptor(identifier: "test") }
+        let pipeline = TFYSwiftInterceptorPipeline()
+        pipeline.add(RepeatingSuspensionInterceptor())
+        let router = TFYSwiftRouter(registry: registry, interceptors: pipeline, events: TFYSwiftRouteEventCenter(), driver: driver)
+        router.maximumSuspensionDepth = 2
+
+        do {
+            try await router.open(TestRoute.detail(id: "loop"))
+            XCTFail("Expected suspension loop")
+        } catch let error as TFYSwiftRouteError {
+            XCTAssertEqual(error, .suspensionLoop)
+        }
+    }
+
+    @MainActor
+    func testResultTimeoutCancelsPendingInteraction() async throws {
+        let driver = Driver()
+        let registry = TFYSwiftRouteRegistry()
+        try registry.register(TestRoute.self) { _, _ in TFYSwiftDestinationDescriptor(identifier: "timeout") }
+        let router = TFYSwiftRouter(registry: registry, interceptors: TFYSwiftInterceptorPipeline(), events: TFYSwiftRouteEventCenter(), driver: driver)
+
+        do {
+            let _: ProductOutput = try await router.open(
+                TestRoute.detail(id: "timeout"),
+                timeout: 0.02,
+                expecting: ProductOutput.self
+            )
+            XCTFail("Expected timeout")
+        } catch let error as TFYSwiftRouteError {
+            XCTAssertEqual(error, .timeout)
+        }
+    }
+
+    @MainActor
+    func testRestorationCoordinatorSnapshotsAndRestoresNavigationStack() async throws {
+        let destinations = TFYSwiftSwiftUIDestinationRegistry()
+        try destinations.register(identifier: "restore", routeType: TestRoute.self) { _, _ in Text("Restore") }
+        let driver = TFYSwiftSwiftUINavigationDriver(destinations: destinations)
+        let routes = TFYSwiftRouteRegistry()
+        try routes.register(TestRoute.self) { _, _ in TFYSwiftDestinationDescriptor(identifier: "restore") }
+        let router = TFYSwiftRouter(registry: routes, interceptors: TFYSwiftInterceptorPipeline(), events: TFYSwiftRouteEventCenter(), driver: driver)
+        let restoration = TFYSwiftRestorationRegistry()
+        try restoration.register(TestRoute.self, identifier: "test.route.v1")
+        let coordinator = TFYSwiftRestorationCoordinator(registry: restoration, router: router)
+
+        try await router.open(TestRoute.detail(id: "root"), presentation: .root())
+        try await router.open(TestRoute.detail(id: "child"), presentation: .push())
+        let snapshot = try coordinator.makeSnapshot(scopes: [.main])
+        try await router.backToRoot()
+        try await coordinator.restore(snapshot)
+
+        XCTAssertEqual(router.navigationRoutes().compactMap { $0.cast(to: TestRoute.self) }, [
+            .detail(id: "root"), .detail(id: "child")
+        ])
+    }
+
+    @MainActor
+    func testSwiftUIReplacingSheetCancelsPreviousInteraction() async throws {
+        let destinations = TFYSwiftSwiftUIDestinationRegistry()
+        try destinations.register(identifier: "sheet", routeType: TestRoute.self) { _, _ in Text("Sheet") }
+        let driver = TFYSwiftSwiftUINavigationDriver(destinations: destinations)
+        var wasCancelled = false
+        let firstResult = TFYSwiftRouteResult(
+            transactionID: UUID(),
+            finish: { _ in },
+            cancel: { _ in wasCancelled = true }
+        )
+        let firstInteraction = TFYSwiftRouteInteraction(result: firstResult)
+
+        for (id, interaction) in [("first", firstInteraction), ("second", nil)] {
+            let route = TFYSwiftAnyRoute(TestRoute.detail(id: id))
+            try await driver.present(
+                destination: TFYSwiftDestinationDescriptor(identifier: "sheet"),
+                route: route,
+                transaction: TFYSwiftRouteTransaction(
+                    route: route,
+                    context: TFYSwiftRouteContext(),
+                    presentation: .sheet(),
+                    deduplication: .none
+                ),
+                interaction: interaction
+            )
+        }
+
+        XCTAssertTrue(wasCancelled)
+    }
+
+    @MainActor
+    func testTransactionStateHistoryIsBounded() async throws {
+        let driver = Driver()
+        let registry = TFYSwiftRouteRegistry()
+        try registry.register(TestRoute.self) { _, _ in TFYSwiftDestinationDescriptor(identifier: "test") }
+        let router = TFYSwiftRouter(registry: registry, interceptors: TFYSwiftInterceptorPipeline(), events: TFYSwiftRouteEventCenter(), driver: driver)
+        router.transactionStateCapacity = 2
+
+        for id in 0..<3 { try await router.open(TestRoute.detail(id: "\(id)")) }
+        XCTAssertEqual(router.transactionStates.count, 2)
+    }
+
+    @MainActor
+    func testTypedRouteContractInfersInputAndOutput() async throws {
+        let router = TFYSwiftTestRouter()
+        router.provide(ProductOutput.self) { ProductOutput(accepted: true) }
+        let input = ProductInput(id: "typed", attributes: [:])
+
+        let output = try await router.openTyped(ContractRoute(id: input.id), input: input)
+
+        XCTAssertEqual(output, ProductOutput(accepted: true))
+        XCTAssertEqual(router.invocations.first?.inputTypeName, String(reflecting: ProductInput.self))
+    }
+
+    @MainActor
+    func testImmediateSessionCancellationClosesCreatedTransaction() async throws {
+        let driver = Driver()
+        let registry = TFYSwiftRouteRegistry()
+        try registry.register(TestRoute.self) { _, _ in TFYSwiftDestinationDescriptor(identifier: "cancel") }
+        let router = TFYSwiftRouter(registry: registry, interceptors: TFYSwiftInterceptorPipeline(), events: TFYSwiftRouteEventCenter(), driver: driver)
+
+        let session = router.openSession(
+            TestRoute.detail(id: "cancel"),
+            input: ProductInput(id: "cancel", attributes: [:]),
+            commands: ProductCommand.self,
+            events: ProductEvent.self,
+            expecting: ProductOutput.self
+        )
+        session.cancel()
+        await Task.yield()
+        await Task.yield()
+
+        XCTAssertTrue(router.transactionStates.values.contains(.cancelled))
+    }
+}
+
+@MainActor
+private func XCTAssertThrowsErrorAsync(
+    _ expression: @escaping @MainActor () async throws -> Void,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) async {
+    do {
+        try await expression()
+        XCTFail("Expected expression to throw", file: file, line: line)
+    } catch {}
 }

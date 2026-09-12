@@ -1,0 +1,19 @@
+{
+  "" : {
+    "diagnostics" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterDeepLink-t.build/Objects-normal/arm64/TFYSwiftRouterDeepLink-primary.dia",
+    "emit-module-dependencies" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterDeepLink-t.build/Objects-normal/arm64/TFYSwiftRouterDeepLink-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterDeepLink-t.build/Objects-normal/arm64/TFYSwiftRouterDeepLink-primary-emit-module.dia",
+    "pch" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterDeepLink-t.build/Objects-normal/arm64/TFYSwiftRouterDeepLink-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterDeepLink-t.build/Objects-normal/arm64/TFYSwiftRouterDeepLink-primary.swiftdeps"
+  },
+  "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/TFYSwiftRouterKit/TFYSwiftRouter/DeepLink/TFYSwiftDeepLink.swift" : {
+    "const-values" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterDeepLink-t.build/Objects-normal/arm64/TFYSwiftDeepLink.swiftconstvalues",
+    "dependencies" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterDeepLink-t.build/Objects-normal/arm64/TFYSwiftDeepLink.d",
+    "diagnostics" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterDeepLink-t.build/Objects-normal/arm64/TFYSwiftDeepLink.dia",
+    "index-unit-output-path" : "/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterDeepLink-t.build/Objects-normal/arm64/TFYSwiftDeepLink.o",
+    "llvm-bc" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterDeepLink-t.build/Objects-normal/arm64/TFYSwiftDeepLink.bc",
+    "object" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterDeepLink-t.build/Objects-normal/arm64/TFYSwiftDeepLink.o",
+    "swift-dependencies" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterDeepLink-t.build/Objects-normal/arm64/TFYSwiftDeepLink.swiftdeps",
+    "swiftmodule" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterDeepLink-t.build/Objects-normal/arm64/TFYSwiftDeepLink~partial.swiftmodule"
+  }
+}

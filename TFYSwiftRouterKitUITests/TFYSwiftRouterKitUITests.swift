@@ -81,6 +81,120 @@ final class TFYSwiftRouterKitUITests: XCTestCase {
     }
 
     @MainActor
+    private func tapRow(_ title: String, in app: XCUIApplication) {
+        let row = app.cells["demo-action-\(title)"]
+        for _ in 0..<14 {
+            if row.exists && row.isHittable { row.tap(); return }
+            app.tables.firstMatch.swipeUp()
+        }
+        XCTFail("找不到可操作入口：\(title)")
+    }
+
+    @MainActor
+    private func launchLaboratory() -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launch()
+        XCTAssertTrue(app.staticTexts["路由能力实验室"].waitForExistence(timeout: 5))
+        tapRow("路由能力实验室", in: app)
+        XCTAssertTrue(app.navigationBars["路由能力实验室"].waitForExistence(timeout: 5))
+        return app
+    }
+
+    @MainActor
+    func testLaboratoryTypedResult() {
+        let app = launchLaboratory()
+        tapRow("强类型 Input → Output", in: app)
+        XCTAssertTrue(app.navigationBars["强类型选择器"].waitForExistence(timeout: 5))
+        app.staticTexts["SwiftUI"].tap()
+        XCTAssertTrue(app.alerts["强类型返回成功"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.alerts["强类型返回成功"].staticTexts["SwiftUI"].exists)
+    }
+
+    @MainActor
+    func testLaboratoryTypedSession() {
+        let app = launchLaboratory()
+        tapRow("强类型双向会话", in: app)
+        XCTAssertTrue(app.staticTexts["✅ 收到上游命令：updateBadge(8)"].waitForExistence(timeout: 5))
+        app.buttons["点击回调：收藏"].tap()
+        app.buttons["完成并返回结果"].tap()
+        XCTAssertTrue(app.alerts["强类型会话完成"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testLaboratorySessionTimeoutAndCancellation() {
+        let app = launchLaboratory()
+        tapRow("会话等待超时（5 秒）", in: app)
+        XCTAssertTrue(app.alerts["会话超时结果"].waitForExistence(timeout: 10))
+        app.alerts["会话超时结果"].buttons["知道了"].tap()
+        tapRow("主动取消会话", in: app)
+        XCTAssertTrue(app.alerts["主动取消结果"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testLaboratoryUIKitHostingSwiftUI() {
+        let app = launchLaboratory()
+        tapRow("UIKit 托管 SwiftUI 页面", in: app)
+        XCTAssertTrue(app.staticTexts["UIKit 托管 SwiftUI 页面"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Scope：lab.navigation"].exists)
+        XCTAssertTrue(app.navigationBars.buttons.firstMatch.exists)
+    }
+
+    @MainActor
+    func testLaboratoryTimeout() {
+        let app = launchLaboratory()
+        tapRow("结果等待超时（3 秒）", in: app)
+        XCTAssertTrue(app.alerts["超时演示结果"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.alerts["超时演示结果"].staticTexts["路由已超时"].exists)
+    }
+
+    @MainActor
+    func testLaboratoryRegistrationAndRuntimeProbes() {
+        let app = launchLaboratory()
+        for (row, result) in [
+            ("通用配置与业务资源隔离", "通用配置检查通过"),
+            ("重复注册与事务回滚", "注册检查通过"),
+            ("拦截器与循环保护", "拦截器检查通过"),
+            ("Deep Link 优先级与安全校验", "Deep Link 检查通过"),
+            ("不可恢复路由 skip / fail", "恢复策略检查通过"),
+            ("历史容量与清理", "历史检查通过"),
+            ("测试替身与调用记录", "测试替身检查通过")
+        ] {
+            tapRow(row, in: app)
+            XCTAssertTrue(app.alerts[result].waitForExistence(timeout: 5), "\(row) 应显示校验成功")
+            app.alerts[result].buttons["知道了"].tap()
+        }
+    }
+
+    @MainActor
+    func testLaboratorySnapshotMigration() {
+        let app = launchLaboratory()
+        tapRow("v1 → v2 迁移并恢复", in: app)
+        XCTAssertTrue(app.alerts["迁移恢复成功"].waitForExistence(timeout: 5))
+        app.alerts["迁移恢复成功"].buttons["知道了"].tap()
+        XCTAssertTrue(app.navigationBars["实验页面 A"].exists)
+        tapRow("保存此导航栈", in: app)
+        XCTAssertTrue(app.alerts["快照已保存"].waitForExistence(timeout: 5))
+        app.alerts["快照已保存"].buttons["知道了"].tap()
+        // 保存行靠近底部；回到顶部使用系统返回按钮，避免依赖旧行的滚动位置。
+        app.navigationBars["实验页面 A"].buttons.firstMatch.tap()
+        tapRow("恢复已保存快照", in: app)
+        XCTAssertTrue(app.alerts["恢复完成"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testLaboratoryNativeSwiftUIFactoryFailure() {
+        let app = launchLaboratory()
+        tapRow("原生 SwiftUI RouterHost", in: app)
+        XCTAssertTrue(app.buttons["验证工厂错误回传"].waitForExistence(timeout: 5))
+        app.buttons["验证工厂错误回传"].tap()
+        XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "路径数量 0 → 0")).firstMatch.waitForExistence(timeout: 5))
+        app.buttons["SwiftUI Sheet"].tap()
+        XCTAssertTrue(app.buttons["关闭 / 返回"].waitForExistence(timeout: 5))
+        app.buttons["关闭 / 返回"].tap()
+        XCTAssertTrue(app.buttons["SwiftUI Push"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {

@@ -25,6 +25,19 @@ final class TFYSwiftDemoHomeViewController: TFYSwiftDemoMenuViewController {
 
     private func rebuildActions() {
         setSections([
+            ("新增能力完整演示", [
+                Action(
+                    title: "路由能力实验室",
+                    detail: "强类型契约、超时取消、注册回滚、恢复迁移、SwiftUI、测试替身",
+                    symbol: "testtube.2"
+                ) { [weak self] in
+                    try await self?.navigator.open(
+                        TFYSwiftDemoHomeRoute.laboratory,
+                        in: .home,
+                        presentation: .fullScreen()
+                    )
+                }
+            ]),
             ("完整跨组件流程", [
                 Action(
                     title: "Home → Product 双向会话",

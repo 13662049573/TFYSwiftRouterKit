@@ -43,7 +43,7 @@ final class TFYSwiftDemoAppCoordinator {
         )
         for tab in TFYSwiftDemoTab.allCases where tab != .home {
             guard let navigation = stacks[tab] else { continue }
-            assembly.register(navigationController: navigation, for: tab.scope)
+            try assembly.register(navigationController: navigation, for: tab.scope)
         }
 
         navigator = TFYSwiftDemoTabRouter(tabBarController: tabBarController, router: assembly.router)

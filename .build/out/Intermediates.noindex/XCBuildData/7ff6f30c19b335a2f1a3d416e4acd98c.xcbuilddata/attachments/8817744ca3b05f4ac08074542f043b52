@@ -1,0 +1,19 @@
+{
+  "" : {
+    "diagnostics" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterTesting-t.build/Objects-normal/arm64/TFYSwiftRouterTesting-primary.dia",
+    "emit-module-dependencies" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterTesting-t.build/Objects-normal/arm64/TFYSwiftRouterTesting-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterTesting-t.build/Objects-normal/arm64/TFYSwiftRouterTesting-primary-emit-module.dia",
+    "pch" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterTesting-t.build/Objects-normal/arm64/TFYSwiftRouterTesting-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterTesting-t.build/Objects-normal/arm64/TFYSwiftRouterTesting-primary.swiftdeps"
+  },
+  "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/TFYSwiftRouterKit/TFYSwiftRouter/Testing/TFYSwiftTestRouter.swift" : {
+    "const-values" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterTesting-t.build/Objects-normal/arm64/TFYSwiftTestRouter.swiftconstvalues",
+    "dependencies" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterTesting-t.build/Objects-normal/arm64/TFYSwiftTestRouter.d",
+    "diagnostics" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterTesting-t.build/Objects-normal/arm64/TFYSwiftTestRouter.dia",
+    "index-unit-output-path" : "/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterTesting-t.build/Objects-normal/arm64/TFYSwiftTestRouter.o",
+    "llvm-bc" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterTesting-t.build/Objects-normal/arm64/TFYSwiftTestRouter.bc",
+    "object" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterTesting-t.build/Objects-normal/arm64/TFYSwiftTestRouter.o",
+    "swift-dependencies" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterTesting-t.build/Objects-normal/arm64/TFYSwiftTestRouter.swiftdeps",
+    "swiftmodule" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterTesting-t.build/Objects-normal/arm64/TFYSwiftTestRouter~partial.swiftmodule"
+  }
+}

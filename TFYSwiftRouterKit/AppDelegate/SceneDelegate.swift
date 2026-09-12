@@ -22,7 +22,11 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             appWindow.rootViewController = coordinator.tabBarController
             appWindow.makeKeyAndVisible()
 
+            // 冷启动既可能来自自定义 Scheme，也可能来自 Universal Link。
             let initialURL = connectionOptions.urlContexts.first?.url
+                ?? connectionOptions.userActivities.first(where: {
+                    $0.activityType == NSUserActivityTypeBrowsingWeb
+                })?.webpageURL
             Task { @MainActor [weak self, weak coordinator] in
                 do {
                     guard let coordinator else { return }

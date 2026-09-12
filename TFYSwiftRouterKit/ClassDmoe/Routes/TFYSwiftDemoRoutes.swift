@@ -43,6 +43,7 @@ enum TFYSwiftDemoHomeRoute: Hashable, Sendable, TFYSwiftRoute {
     case root
     case architecture
     case inspector
+    case laboratory
 }
 
 enum TFYSwiftDemoProductRoute: Hashable, Sendable, TFYSwiftRoute {

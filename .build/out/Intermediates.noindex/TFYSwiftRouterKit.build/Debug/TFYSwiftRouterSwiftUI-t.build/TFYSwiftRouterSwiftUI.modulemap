@@ -1,0 +1,4 @@
+module TFYSwiftRouterSwiftUI {
+header "TFYSwiftRouterSwiftUI-Swift.h"
+export *
+}

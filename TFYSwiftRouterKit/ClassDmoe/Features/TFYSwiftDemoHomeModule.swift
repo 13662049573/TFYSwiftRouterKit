@@ -29,11 +29,16 @@ struct TFYSwiftDemoHomeModule: TFYSwiftUIKitComponentModule {
     }
 
     func register(in assembly: TFYSwiftRouterAssembly) throws {
+        try assembly.destinations.register(
+            identifier: "home.laboratory",
+            routeType: TFYSwiftDemoHomeRoute.self
+        ) { _, _ in try TFYSwiftDemoLabNavigationController(laboratory: ()) }
         try assembly.routes.register(TFYSwiftDemoHomeRoute.self) { route, _ in
             switch route {
             case .root: TFYSwiftDestinationDescriptor(identifier: "home.root")
             case .architecture: TFYSwiftDestinationDescriptor(identifier: "home.architecture")
             case .inspector: TFYSwiftDestinationDescriptor(identifier: "home.inspector")
+            case .laboratory: TFYSwiftDestinationDescriptor(identifier: "home.laboratory")
             }
         }
         try assembly.destinations.register(

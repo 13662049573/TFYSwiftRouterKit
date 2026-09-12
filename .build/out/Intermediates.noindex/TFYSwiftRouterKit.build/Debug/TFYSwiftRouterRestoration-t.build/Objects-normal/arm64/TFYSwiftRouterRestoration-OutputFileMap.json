@@ -1,0 +1,19 @@
+{
+  "" : {
+    "diagnostics" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterRestoration-t.build/Objects-normal/arm64/TFYSwiftRouterRestoration-primary.dia",
+    "emit-module-dependencies" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterRestoration-t.build/Objects-normal/arm64/TFYSwiftRouterRestoration-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterRestoration-t.build/Objects-normal/arm64/TFYSwiftRouterRestoration-primary-emit-module.dia",
+    "pch" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterRestoration-t.build/Objects-normal/arm64/TFYSwiftRouterRestoration-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterRestoration-t.build/Objects-normal/arm64/TFYSwiftRouterRestoration-primary.swiftdeps"
+  },
+  "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/TFYSwiftRouterKit/TFYSwiftRouter/Restoration/TFYSwiftRestoration.swift" : {
+    "const-values" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterRestoration-t.build/Objects-normal/arm64/TFYSwiftRestoration.swiftconstvalues",
+    "dependencies" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterRestoration-t.build/Objects-normal/arm64/TFYSwiftRestoration.d",
+    "diagnostics" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterRestoration-t.build/Objects-normal/arm64/TFYSwiftRestoration.dia",
+    "index-unit-output-path" : "/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterRestoration-t.build/Objects-normal/arm64/TFYSwiftRestoration.o",
+    "llvm-bc" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterRestoration-t.build/Objects-normal/arm64/TFYSwiftRestoration.bc",
+    "object" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterRestoration-t.build/Objects-normal/arm64/TFYSwiftRestoration.o",
+    "swift-dependencies" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterRestoration-t.build/Objects-normal/arm64/TFYSwiftRestoration.swiftdeps",
+    "swiftmodule" : "/Users/tianfengyou/Desktop/github/TFYSwiftRouterKit/.build/out/Intermediates.noindex/TFYSwiftRouterKit.build/Debug/TFYSwiftRouterRestoration-t.build/Objects-normal/arm64/TFYSwiftRestoration~partial.swiftmodule"
+  }
+}
