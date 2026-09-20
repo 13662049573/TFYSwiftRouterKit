@@ -11,7 +11,7 @@ import TFYSwiftRouterCore
 
 @MainActor
 /// 把平台无关的导航请求映射到 UINavigationController 与模态呈现。
-public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDriver {
+public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDriver, TFYSwiftNavigationCheckpointing {
     public typealias CustomPresentation = @MainActor (
         _ source: UIViewController,
         _ destination: UIViewController,
@@ -23,6 +23,7 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
     private final class TrackedController {
         weak var controller: UIViewController?
         let route: TFYSwiftAnyRoute
+        var isNavigationStackEntry = false
 
         init(controller: UIViewController, route: TFYSwiftAnyRoute) {
             self.controller = controller
@@ -33,6 +34,34 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
     private var trackedControllers: [TrackedController] = []
     private var customPresentations: [String: CustomPresentation] = [:]
     private var newWindowPresentation: CustomPresentation?
+    private let navigationDelegateObserver = TFYSwiftNavigationDelegateObserver()
+    private struct CheckpointState {
+        let id: UUID
+        let viewControllers: [UIViewController]
+    }
+    private final class Checkpoint: TFYSwiftNavigationCheckpoint {
+        private weak var driver: TFYSwiftUIKitNavigationDriver?
+        private let id: UUID
+        private var isResolved = false
+
+        init(driver: TFYSwiftUIKitNavigationDriver, id: UUID) {
+            self.driver = driver
+            self.id = id
+        }
+
+        func commit() {
+            guard !isResolved else { return }
+            isResolved = true
+            driver?.resolveCheckpoint(id: id, commit: true)
+        }
+
+        func rollback() {
+            guard !isResolved else { return }
+            isResolved = true
+            driver?.resolveCheckpoint(id: id, commit: false)
+        }
+    }
+    private var checkpointState: CheckpointState?
 
     /// 注入导航容器与页面工厂表；便利初始化器创建空表，容器由 App 强持有。
     public init(
@@ -42,6 +71,10 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
         self.navigationController = navigationController
         self.destinations = destinations
         super.init()
+        navigationDelegateObserver.onDidShow = { [weak self] navigationController in
+            self?.navigationControllerDidShow(navigationController)
+        }
+        installNavigationDelegateObserver()
     }
 
     /// 注入导航容器与页面工厂表；便利初始化器创建空表，容器由 App 强持有。
@@ -73,6 +106,17 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
         guard let navigationController else {
             throw TFYSwiftRouteError.scopeUnavailable(transaction.context.scope.rawValue)
         }
+        installNavigationDelegateObserver()
+        if checkpointState != nil {
+            guard navigationController.presentedViewController == nil else {
+                throw TFYSwiftRouteError.restorationFailed("恢复期间出现了新的模态页面")
+            }
+            switch transaction.presentation {
+            case .automatic, .push, .replace, .root: break
+            default:
+                throw TFYSwiftRouteError.restorationFailed("恢复检查点只支持 root/push 导航")
+            }
+        }
 
         let context = TFYSwiftDestinationContext(
             routeContext: transaction.context,
@@ -84,7 +128,7 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
             route: route,
             context: context
         )
-        track(viewController, route: route)
+        let trackedController = track(viewController, route: route)
         if let interaction {
             objc_setAssociatedObject(
                 viewController,
@@ -96,32 +140,39 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
 
         switch transaction.presentation {
         case .automatic:
+            trackedController.isNavigationStackEntry = true
             navigationController.pushViewController(viewController, animated: true)
         case .push(let animated):
+            trackedController.isNavigationStackEntry = true
             navigationController.pushViewController(viewController, animated: animated)
         case .sheet(let configuration):
             configureSheet(viewController, configuration: configuration)
             try topViewController(from: navigationController).presentSafely(viewController, animated: true)
-            observeInteractiveDismiss(of: viewController, interaction: interaction)
+            observeModalDismissal(of: viewController, interaction: interaction)
         case .fullScreen(let animated):
             viewController.modalPresentationStyle = .fullScreen
             try topViewController(from: navigationController).presentSafely(viewController, animated: animated)
+            observeModalDismissal(of: viewController, interaction: interaction)
         case .replace(let animated):
+            trackedController.isNavigationStackEntry = true
             var stack = navigationController.viewControllers
             if stack.isEmpty {
                 stack = [viewController]
             } else {
-                cancelInteraction(of: stack[stack.count - 1])
+                if checkpointState == nil { cancelInteraction(of: stack[stack.count - 1]) }
                 stack[stack.count - 1] = viewController
             }
             navigationController.setViewControllers(stack, animated: animated)
         case .root(let animated):
+            trackedController.isNavigationStackEntry = true
             cancelPresentedHierarchy(from: navigationController)
             // 只关闭此 Scope 展示的子弹层，不能把作为模态容器的导航控制器自身关闭。
             if navigationController.presentedViewController != nil {
                 navigationController.dismiss(animated: false)
             }
-            navigationController.viewControllers.forEach(cancelInteraction(of:))
+            if checkpointState == nil {
+                navigationController.viewControllers.forEach(cancelInteraction(of:))
+            }
             navigationController.setViewControllers([viewController], animated: animated)
         case .newWindow:
             guard let newWindowPresentation else { throw TFYSwiftRouteError.sceneUnavailable }
@@ -177,6 +228,27 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
         return navigationController.viewControllers.compactMap { route(for: $0) }
     }
 
+    /// 保存当前导航控制器中的页面实例；存在子模态页面时拒绝开始恢复。
+    public func makeNavigationCheckpoint(
+        in scope: TFYSwiftNavigationScopeID
+    ) throws -> any TFYSwiftNavigationCheckpoint {
+        guard checkpointState == nil else {
+            throw TFYSwiftRouteError.restorationFailed("UIKit 导航已有未完成的恢复事务")
+        }
+        guard let navigationController else {
+            throw TFYSwiftRouteError.scopeUnavailable(scope.rawValue)
+        }
+        guard navigationController.presentedViewController == nil else {
+            throw TFYSwiftRouteError.restorationFailed("恢复前请先关闭当前 Scope 的模态页面")
+        }
+        let id = UUID()
+        checkpointState = CheckpointState(
+            id: id,
+            viewControllers: navigationController.viewControllers
+        )
+        return Checkpoint(driver: self, id: id)
+    }
+
     /// 回退指定层数；至少回退一层，最多回到当前容器根页。
     public func back(count: Int, in scope: TFYSwiftNavigationScopeID) async throws {
         guard let navigationController else { throw TFYSwiftRouteError.scopeUnavailable(scope.rawValue) }
@@ -227,27 +299,59 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
         }
     }
 
-    private func observeInteractiveDismiss(of viewController: UIViewController, interaction: TFYSwiftRouteInteraction?) {
-        guard let interaction, let presentationController = viewController.presentationController else { return }
+    private func observeModalDismissal(of viewController: UIViewController, interaction: TFYSwiftRouteInteraction?) {
+        guard let interaction else { return }
+        let lifecycleObserver = TFYSwiftModalDismissObserverViewController(owner: viewController) {
+            interaction.cancel()
+        }
+        let lifecycleHost = (viewController as? UINavigationController)?.visibleViewController ?? viewController
+        lifecycleHost.addChild(lifecycleObserver)
+        lifecycleHost.view.addSubview(lifecycleObserver.view)
+        lifecycleObserver.didMove(toParent: lifecycleHost)
+
+        guard let presentationController = viewController.presentationController else { return }
         let observer = TFYSwiftPresentationDismissObserver {
             interaction.cancel()
         }
+        observer.forwardingDelegate = presentationController.delegate
         objc_setAssociatedObject(
             viewController,
             &TFYSwiftResultLifecycleAssociation.dismissObserverKey,
             observer,
             .OBJC_ASSOCIATION_RETAIN_NONATOMIC
         )
-        // Preserve an application-owned adaptive presentation delegate when one already exists.
-        if presentationController.delegate == nil {
-            presentationController.delegate = observer
+        presentationController.delegate = observer
+    }
+
+    private func installNavigationDelegateObserver() {
+        guard let navigationController,
+              navigationController.delegate !== navigationDelegateObserver else { return }
+        navigationDelegateObserver.forwardingDelegate = navigationController.delegate
+        navigationController.delegate = navigationDelegateObserver
+    }
+
+    private func navigationControllerDidShow(_ navigationController: UINavigationController) {
+        if checkpointState != nil {
+            pruneTrackedControllers()
+            return
+        }
+        let controllers = Set(navigationController.viewControllers.map(ObjectIdentifier.init))
+        trackedControllers.removeAll { trackedController in
+            guard let controller = trackedController.controller else { return true }
+            guard trackedController.isNavigationStackEntry,
+                  !controllers.contains(ObjectIdentifier(controller)) else { return false }
+            cancelInteraction(of: controller)
+            return true
         }
     }
 
-    private func track(_ controller: UIViewController, route: TFYSwiftAnyRoute) {
+    @discardableResult
+    private func track(_ controller: UIViewController, route: TFYSwiftAnyRoute) -> TrackedController {
         pruneTrackedControllers()
         trackedControllers.removeAll { $0.controller === controller }
-        trackedControllers.append(TrackedController(controller: controller, route: route))
+        let trackedController = TrackedController(controller: controller, route: route)
+        trackedControllers.append(trackedController)
+        return trackedController
     }
 
     private func route(for controller: UIViewController) -> TFYSwiftAnyRoute? {
@@ -293,6 +397,26 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
         }
     }
 
+    private func resolveCheckpoint(id: UUID, commit: Bool) {
+        guard let checkpoint = checkpointState, checkpoint.id == id,
+              let navigationController else { return }
+        let previousIDs = Set(checkpoint.viewControllers.map(ObjectIdentifier.init))
+        let currentControllers = navigationController.viewControllers
+        let currentIDs = Set(currentControllers.map(ObjectIdentifier.init))
+        if commit {
+            checkpoint.viewControllers
+                .filter { !currentIDs.contains(ObjectIdentifier($0)) }
+                .forEach(cancelInteraction(of:))
+        } else {
+            currentControllers
+                .filter { !previousIDs.contains(ObjectIdentifier($0)) }
+                .forEach(cancelInteraction(of:))
+            navigationController.setViewControllers(checkpoint.viewControllers, animated: false)
+        }
+        checkpointState = nil
+        navigationControllerDidShow(navigationController)
+    }
+
     private func topViewController(from root: UIViewController) -> UIViewController {
         if let presented = root.presentedViewController { return topViewController(from: presented) }
         if let navigation = root as? UINavigationController, let visible = navigation.visibleViewController {
@@ -308,6 +432,41 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
 private enum TFYSwiftResultLifecycleAssociation {
     nonisolated(unsafe) static var key: UInt8 = 0
     nonisolated(unsafe) static var dismissObserverKey: UInt8 = 0
+}
+
+@MainActor
+private final class TFYSwiftModalDismissObserverViewController: UIViewController {
+    private weak var owner: UIViewController?
+    private var onDismiss: (() -> Void)?
+
+    init(owner: UIViewController, onDismiss: @escaping () -> Void) {
+        self.owner = owner
+        self.onDismiss = onDismiss
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func loadView() {
+        let view = UIView(frame: .zero)
+        view.isHidden = true
+        view.isAccessibilityElement = false
+        self.view = view
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        guard let owner else { return }
+        let wasDismissed = owner.isBeingDismissed
+            || owner.navigationController?.isBeingDismissed == true
+            || (owner.presentingViewController == nil
+                && owner.navigationController?.presentingViewController == nil)
+        guard wasDismissed else { return }
+        let operation = onDismiss
+        onDismiss = nil
+        operation?()
+    }
 }
 
 private final class TFYSwiftResultLifecycleToken: NSObject {
@@ -328,9 +487,66 @@ private final class TFYSwiftResultLifecycleToken: NSObject {
 
 @MainActor
 private final class TFYSwiftPresentationDismissObserver: NSObject, UIAdaptivePresentationControllerDelegate {
+    nonisolated(unsafe) weak var forwardingDelegate: UIAdaptivePresentationControllerDelegate?
     private let onDismiss: () -> Void
     init(onDismiss: @escaping () -> Void) { self.onDismiss = onDismiss }
-    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) { onDismiss() }
+
+    func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
+        onDismiss()
+        forwardingDelegate?.presentationControllerDidDismiss?(presentationController)
+    }
+
+    override func responds(to selector: Selector!) -> Bool {
+        super.responds(to: selector) || forwardingDelegate?.responds(to: selector) == true
+    }
+
+    override func forwardingTarget(for selector: Selector!) -> Any? {
+        guard forwardingDelegate?.responds(to: selector) == true else {
+            return super.forwardingTarget(for: selector)
+        }
+        return forwardingDelegate
+    }
+}
+
+private final class TFYSwiftNavigationDelegateObserver: NSObject, UINavigationControllerDelegate {
+    nonisolated(unsafe) weak var forwardingDelegate: UINavigationControllerDelegate?
+    var onDidShow: (@MainActor (UINavigationController) -> Void)?
+
+    func navigationController(
+        _ navigationController: UINavigationController,
+        willShow viewController: UIViewController,
+        animated: Bool
+    ) {
+        forwardingDelegate?.navigationController?(
+            navigationController,
+            willShow: viewController,
+            animated: animated
+        )
+    }
+
+    func navigationController(
+        _ navigationController: UINavigationController,
+        didShow viewController: UIViewController,
+        animated: Bool
+    ) {
+        onDidShow?(navigationController)
+        forwardingDelegate?.navigationController?(
+            navigationController,
+            didShow: viewController,
+            animated: animated
+        )
+    }
+
+    override func responds(to selector: Selector!) -> Bool {
+        super.responds(to: selector) || forwardingDelegate?.responds(to: selector) == true
+    }
+
+    override func forwardingTarget(for selector: Selector!) -> Any? {
+        guard forwardingDelegate?.responds(to: selector) == true else {
+            return super.forwardingTarget(for: selector)
+        }
+        return forwardingDelegate
+    }
 }
 
 @MainActor

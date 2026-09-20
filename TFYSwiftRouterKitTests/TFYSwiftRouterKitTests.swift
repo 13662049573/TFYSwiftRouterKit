@@ -20,6 +20,14 @@ final class TFYSwiftRouterKitTests: XCTestCase {
         let id: String
     }
 
+    private struct ConfiguredRoute: Hashable, Sendable, TFYSwiftRoute {
+        let id: String
+    }
+
+    private struct OtherConfiguredRoute: Hashable, Sendable, TFYSwiftRoute {
+        let id: String
+    }
+
     private protocol CartServicing: TFYSwiftComponentService {
         func count() async -> Int
     }
@@ -76,6 +84,17 @@ final class TFYSwiftRouterKitTests: XCTestCase {
         XCTAssertEqual(erased.cast(to: TestRoute.self), route)
         XCTAssertEqual(erased, TFYSwiftAnyRoute(route))
         XCTAssertNil(erased.cast(to: OtherRoute.self))
+    }
+
+    @MainActor
+    func testDemoBarsPreventContentUnderlap() throws {
+        let coordinator = try TFYDemoAppCoordinator()
+        let navigationControllers = try XCTUnwrap(coordinator.tabBarController.viewControllers)
+            .compactMap { $0 as? UINavigationController }
+
+        XCTAssertFalse(coordinator.tabBarController.tabBar.isTranslucent)
+        XCTAssertEqual(navigationControllers.count, TFYDemoTab.allCases.count)
+        XCTAssertTrue(navigationControllers.allSatisfy { !$0.navigationBar.isTranslucent })
     }
 
     @MainActor
@@ -181,6 +200,95 @@ final class TFYSwiftRouterKitTests: XCTestCase {
     }
 
     @MainActor
+    func testUIKitTypedRegistrationReceivesContractContext() throws {
+        let assembly = TFYSwiftRouterAssembly(navigationController: UINavigationController())
+        let input = ProductInput(id: "typed", attributes: ["source": "test"])
+        var output: ProductOutput?
+        let result = TFYSwiftRouteResult(
+            transactionID: UUID(),
+            finish: { output = $0 as? ProductOutput },
+            cancel: { _ in }
+        )
+        try assembly.registerTyped(ContractRoute.self) { route, context in
+            XCTAssertEqual(route.id, input.id)
+            XCTAssertEqual(context.input, input)
+            try context.finish(ProductOutput(accepted: true))
+            return UIViewController()
+        }
+
+        _ = try assembly.destinations.makeViewController(
+            identifier: String(reflecting: ContractRoute.self),
+            route: TFYSwiftAnyRoute(ContractRoute(id: input.id)),
+            context: TFYSwiftDestinationContext(
+                routeContext: TFYSwiftRouteContext(),
+                presentation: .push(),
+                interaction: TFYSwiftRouteInteraction(
+                    input: TFYSwiftRoutePayload(input),
+                    result: result
+                )
+            )
+        )
+
+        XCTAssertEqual(output, ProductOutput(accepted: true))
+    }
+
+    @MainActor
+    func testUIKitRouteConfigurationRegistersFactoryAndRootAssociation() async throws {
+        let scope: TFYSwiftNavigationScopeID = "configured.root"
+        let navigation = UINavigationController()
+        let assembly = try TFYSwiftRouterAssembly(
+            tabBarController: UITabBarController(),
+            tabs: [.init(scope: scope, navigationController: navigation)],
+            initialScope: scope
+        )
+        let route = ConfiguredRoute(id: "root")
+        let configuration = TFYSwiftUIKitRouteConfiguration<ConfiguredRoute>(
+            rootScope: scope,
+            rootRoute: route,
+            destinationID: "configured.page"
+        ) { route, _ in
+            let controller = UIViewController()
+            controller.title = route.id
+            return controller
+        }
+
+        let roots = try assembly.registerConfigurations([configuration])
+        XCTAssertEqual(roots.count, 1)
+        XCTAssertEqual(roots.first?.scope, scope)
+        XCTAssertEqual(roots.first?.route, TFYSwiftAnyRoute(route))
+
+        let descriptor = try await assembly.routes.resolve(
+            TFYSwiftAnyRoute(route),
+            context: TFYSwiftRouteContext(scope: scope)
+        )
+        let controller = try assembly.destinations.makeViewController(
+            identifier: descriptor.identifier,
+            route: TFYSwiftAnyRoute(route),
+            context: TFYSwiftDestinationContext(
+                routeContext: TFYSwiftRouteContext(scope: scope),
+                presentation: .root()
+            )
+        )
+        XCTAssertEqual(controller.title, "root")
+    }
+
+    @MainActor
+    func testUIKitRouteConfigurationBatchRollsBackEveryRegistration() throws {
+        let assembly = TFYSwiftRouterAssembly(navigationController: UINavigationController())
+        let first = TFYSwiftUIKitRouteConfiguration<ConfiguredRoute>(destinationID: "duplicate.page") { _, _ in
+            UIViewController()
+        }
+        let second = TFYSwiftUIKitRouteConfiguration<OtherConfiguredRoute>(destinationID: "duplicate.page") { _, _ in
+            UIViewController()
+        }
+
+        XCTAssertThrowsError(try assembly.registerConfigurations([first, second]))
+        XCTAssertFalse(assembly.routes.contains(ConfiguredRoute.self))
+        XCTAssertFalse(assembly.routes.contains(OtherConfiguredRoute.self))
+        XCTAssertTrue(assembly.destinations.registeredDestinationIDs.isEmpty)
+    }
+
+    @MainActor
     func testBidirectionalSessionPassesInputCommandsEventsAndFinalResult() async throws {
         let driver = Driver()
         let registry = TFYSwiftRouteRegistry()
@@ -277,33 +385,75 @@ final class TFYSwiftRouterKitTests: XCTestCase {
     }
 
     @MainActor
-    func testFourTabDemoCompositionRegistersAndInstallsRootsByRoute() async throws {
-        let coordinator = try TFYSwiftDemoAppCoordinator()
-        XCTAssertEqual(coordinator.tabBarController.viewControllers?.count, 4)
-        XCTAssertEqual(coordinator.assembly.routes.registeredRouteNames.count, 4)
-        XCTAssertEqual(coordinator.assembly.destinations.registeredDestinationIDs.count, 16)
-        XCTAssertTrue(coordinator.assembly.destinations.contains("home.laboratory"))
-        XCTAssertEqual(
-            coordinator.tabBarController.viewControllers?.compactMap { $0.tabBarItem.title },
-            ["首页", "商品", "购物车", "我的"]
+    func testTabBarAssemblySelectsTargetScopeBeforeOpeningRoute() async throws {
+        let home = UINavigationController(rootViewController: UIViewController())
+        let catalog = UINavigationController(rootViewController: UIViewController())
+        let tabBarController = UITabBarController()
+        let homeScope: TFYSwiftNavigationScopeID = "test.home"
+        let catalogScope: TFYSwiftNavigationScopeID = "test.catalog"
+        let assembly = try TFYSwiftRouterAssembly(
+            tabBarController: tabBarController,
+            tabs: [
+                TFYSwiftTabBarScope(scope: homeScope, navigationController: home),
+                TFYSwiftTabBarScope(scope: catalogScope, navigationController: catalog)
+            ],
+            initialScope: homeScope
+        )
+        try assembly.register(TestRoute.self) { _, _ in UIViewController() }
+
+        try await assembly.router.open(
+            TestRoute.detail(id: "catalog"),
+            presentation: .push(animated: false),
+            scope: catalogScope
         )
 
-        try await coordinator.start()
-        XCTAssertEqual(
-            coordinator.assembly.scopedDriver.routes(in: TFYSwiftDemoTab.home.scope),
-            [TFYSwiftAnyRoute(TFYSwiftDemoHomeRoute.root)]
+        XCTAssertEqual(tabBarController.selectedIndex, 1)
+        XCTAssertEqual(home.viewControllers.count, 1)
+        XCTAssertEqual(catalog.viewControllers.count, 2)
+        XCTAssertEqual(assembly.tabBarDriver?.selectedScope, catalogScope)
+
+        tabBarController.selectedIndex = 0
+        try await assembly.router.back(scope: catalogScope)
+
+        XCTAssertEqual(tabBarController.selectedIndex, 1)
+    }
+
+    @MainActor
+    func testTabBarAssemblyRejectsUnknownScopeWithoutChangingSelection() async throws {
+        let home = UINavigationController(rootViewController: UIViewController())
+        let tabBarController = UITabBarController()
+        let homeScope: TFYSwiftNavigationScopeID = "test.home"
+        let assembly = try TFYSwiftRouterAssembly(
+            tabBarController: tabBarController,
+            tabs: [TFYSwiftTabBarScope(scope: homeScope, navigationController: home)],
+            initialScope: homeScope
         )
-        XCTAssertEqual(
-            coordinator.assembly.scopedDriver.routes(in: TFYSwiftDemoTab.products.scope),
-            [TFYSwiftAnyRoute(TFYSwiftDemoProductRoute.root)]
-        )
-        XCTAssertEqual(
-            coordinator.assembly.scopedDriver.routes(in: TFYSwiftDemoTab.cart.scope),
-            [TFYSwiftAnyRoute(TFYSwiftDemoCartRoute.root)]
-        )
-        XCTAssertEqual(
-            coordinator.assembly.scopedDriver.routes(in: TFYSwiftDemoTab.profile.scope),
-            [TFYSwiftAnyRoute(TFYSwiftDemoProfileRoute.root)]
+        try assembly.register(TestRoute.self) { _, _ in UIViewController() }
+
+        await XCTAssertThrowsErrorAsync {
+            try await assembly.router.open(
+                TestRoute.detail(id: "missing"),
+                presentation: .push(animated: false),
+                scope: "test.missing"
+            )
+        }
+
+        XCTAssertEqual(tabBarController.selectedIndex, 0)
+        XCTAssertEqual(home.viewControllers.count, 1)
+    }
+
+    @MainActor
+    func testTabBarAssemblyRejectsDuplicateScope() {
+        let scope: TFYSwiftNavigationScopeID = "test.duplicate"
+        XCTAssertThrowsError(
+            try TFYSwiftRouterAssembly(
+                tabBarController: UITabBarController(),
+                tabs: [
+                    TFYSwiftTabBarScope(scope: scope, navigationController: UINavigationController()),
+                    TFYSwiftTabBarScope(scope: scope, navigationController: UINavigationController())
+                ],
+                initialScope: scope
+            )
         )
     }
 
@@ -453,6 +603,172 @@ final class TFYSwiftRouterKitTests: XCTestCase {
     }
 
     @MainActor
+    func testSwiftUICheckpointRollbackPreservesEntryAndInteraction() async throws {
+        let destinations = TFYSwiftSwiftUIDestinationRegistry()
+        try destinations.register(identifier: "checkpoint", routeType: TestRoute.self) { _, _ in
+            Text("Checkpoint")
+        }
+        let driver = TFYSwiftSwiftUINavigationDriver(destinations: destinations)
+        var wasCancelled = false
+        let result = TFYSwiftRouteResult(
+            transactionID: UUID(),
+            finish: { _ in },
+            cancel: { _ in wasCancelled = true }
+        )
+        let originalRoute = TFYSwiftAnyRoute(TestRoute.detail(id: "original"))
+        try await driver.present(
+            destination: TFYSwiftDestinationDescriptor(identifier: "checkpoint"),
+            route: originalRoute,
+            transaction: TFYSwiftRouteTransaction(
+                route: originalRoute,
+                context: TFYSwiftRouteContext(),
+                presentation: .root(animated: false),
+                deduplication: .none
+            ),
+            interaction: TFYSwiftRouteInteraction(result: result)
+        )
+        let originalID = try XCTUnwrap(driver.rootEntry?.id)
+        let checkpoint = try driver.makeNavigationCheckpoint(in: .main)
+        let replacementRoute = TFYSwiftAnyRoute(TestRoute.detail(id: "replacement"))
+
+        try await driver.present(
+            destination: TFYSwiftDestinationDescriptor(identifier: "checkpoint"),
+            route: replacementRoute,
+            transaction: TFYSwiftRouteTransaction(
+                route: replacementRoute,
+                context: TFYSwiftRouteContext(),
+                presentation: .root(animated: false),
+                deduplication: .none
+            ),
+            interaction: nil
+        )
+        checkpoint.rollback()
+
+        XCTAssertEqual(driver.rootEntry?.id, originalID)
+        XCTAssertEqual(driver.rootEntry?.route, originalRoute)
+        XCTAssertFalse(wasCancelled)
+    }
+
+    @MainActor
+    func testSwiftUIActivatingSheetDismissesCoveringFullScreen() async throws {
+        let destinations = TFYSwiftSwiftUIDestinationRegistry()
+        try destinations.register(identifier: "modal", routeType: TestRoute.self) { _, _ in Text("Modal") }
+        let driver = TFYSwiftSwiftUINavigationDriver(destinations: destinations)
+        let sheetRoute = TFYSwiftAnyRoute(TestRoute.detail(id: "sheet"))
+        let fullScreenRoute = TFYSwiftAnyRoute(TestRoute.detail(id: "fullScreen"))
+        var fullScreenWasCancelled = false
+        let fullScreenResult = TFYSwiftRouteResult(
+            transactionID: UUID(),
+            finish: { _ in },
+            cancel: { _ in fullScreenWasCancelled = true }
+        )
+
+        try await driver.present(
+            destination: TFYSwiftDestinationDescriptor(identifier: "modal"),
+            route: sheetRoute,
+            transaction: TFYSwiftRouteTransaction(
+                route: sheetRoute,
+                context: TFYSwiftRouteContext(),
+                presentation: .sheet(),
+                deduplication: .none
+            ),
+            interaction: nil
+        )
+        try await driver.present(
+            destination: TFYSwiftDestinationDescriptor(identifier: "modal"),
+            route: fullScreenRoute,
+            transaction: TFYSwiftRouteTransaction(
+                route: fullScreenRoute,
+                context: TFYSwiftRouteContext(),
+                presentation: .fullScreen(),
+                deduplication: .none
+            ),
+            interaction: TFYSwiftRouteInteraction(result: fullScreenResult)
+        )
+
+        let activated = try await driver.activate(sheetRoute, in: .main)
+        XCTAssertTrue(activated)
+        XCTAssertNil(driver.fullScreen)
+        XCTAssertEqual(driver.sheet?.route, sheetRoute)
+        XCTAssertTrue(driver.isTop(sheetRoute, in: .main))
+        XCTAssertTrue(fullScreenWasCancelled)
+    }
+
+    @MainActor
+    func testSwiftUIStaleSheetDismissCallbackKeepsReplacement() async throws {
+        let destinations = TFYSwiftSwiftUIDestinationRegistry()
+        try destinations.register(identifier: "sheet", routeType: TestRoute.self) { _, _ in Text("Sheet") }
+        let driver = TFYSwiftSwiftUINavigationDriver(destinations: destinations)
+
+        let firstRoute = TFYSwiftAnyRoute(TestRoute.detail(id: "first"))
+        try await driver.present(
+            destination: TFYSwiftDestinationDescriptor(identifier: "sheet"),
+            route: firstRoute,
+            transaction: TFYSwiftRouteTransaction(
+                route: firstRoute,
+                context: TFYSwiftRouteContext(),
+                presentation: .sheet(),
+                deduplication: .none
+            ),
+            interaction: nil
+        )
+        let firstID = try XCTUnwrap(driver.sheet?.id)
+        let secondRoute = TFYSwiftAnyRoute(TestRoute.detail(id: "second"))
+        try await driver.present(
+            destination: TFYSwiftDestinationDescriptor(identifier: "sheet"),
+            route: secondRoute,
+            transaction: TFYSwiftRouteTransaction(
+                route: secondRoute,
+                context: TFYSwiftRouteContext(),
+                presentation: .sheet(),
+                deduplication: .none
+            ),
+            interaction: nil
+        )
+
+        driver.sheetDidDismiss(firstID)
+
+        XCTAssertEqual(driver.sheet?.route.cast(to: TestRoute.self), .detail(id: "second"))
+    }
+
+    @MainActor
+    func testSwiftUIStaleFullScreenDismissCallbackKeepsReplacement() async throws {
+        let destinations = TFYSwiftSwiftUIDestinationRegistry()
+        try destinations.register(identifier: "fullScreen", routeType: TestRoute.self) { _, _ in Text("FullScreen") }
+        let driver = TFYSwiftSwiftUINavigationDriver(destinations: destinations)
+
+        let firstRoute = TFYSwiftAnyRoute(TestRoute.detail(id: "first"))
+        try await driver.present(
+            destination: TFYSwiftDestinationDescriptor(identifier: "fullScreen"),
+            route: firstRoute,
+            transaction: TFYSwiftRouteTransaction(
+                route: firstRoute,
+                context: TFYSwiftRouteContext(),
+                presentation: .fullScreen(),
+                deduplication: .none
+            ),
+            interaction: nil
+        )
+        let firstID = try XCTUnwrap(driver.fullScreen?.id)
+        let secondRoute = TFYSwiftAnyRoute(TestRoute.detail(id: "second"))
+        try await driver.present(
+            destination: TFYSwiftDestinationDescriptor(identifier: "fullScreen"),
+            route: secondRoute,
+            transaction: TFYSwiftRouteTransaction(
+                route: secondRoute,
+                context: TFYSwiftRouteContext(),
+                presentation: .fullScreen(),
+                deduplication: .none
+            ),
+            interaction: nil
+        )
+
+        driver.fullScreenDidDismiss(firstID)
+
+        XCTAssertEqual(driver.fullScreen?.route, secondRoute)
+    }
+
+    @MainActor
     func testTransactionStateHistoryIsBounded() async throws {
         let driver = Driver()
         let registry = TFYSwiftRouteRegistry()
@@ -496,6 +812,7 @@ final class TFYSwiftRouterKitTests: XCTestCase {
 
         XCTAssertTrue(router.transactionStates.values.contains(.cancelled))
     }
+
 }
 
 @MainActor

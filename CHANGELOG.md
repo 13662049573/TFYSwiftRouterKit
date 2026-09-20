@@ -2,9 +2,26 @@
 
 本文件记录 TFYSwiftRouterKit 的用户可见变更。版本遵循语义化版本；SwiftPM 使用同名 Git Tag，CocoaPods 使用 `TFYSwiftRouterKit.podspec` 中的版本。
 
-## Unreleased
+## 2.1.0 - 2026-09-20
 
-暂无。
+- 新增 `TFYSwiftTabBarNavigationDriver` 与 `TFYSwiftTabBarScope`；TabBar Assembly 会把 Scope 映射到真实 Tab，并在跨 Scope 展示、激活、回退和关闭前自动选择目标 Tab。
+- `TFYSwiftRouterAssembly` 新增 TabBar 初始化器、`tabBarDriver` 和按 Scope 暴露的 `navigationDrivers`，宿主可统一配置 custom/newWindow，而业务层不再手动维护 `selectedIndex`。
+- 旧 Demo 已整体删除并从零重建为“开始、演练、导航栈、事件”四 Tab；覆盖全部呈现方式、跨 Tab、去重、拦截、Deep Link、Typed Result、Session、超时/取消、注册事务、组件服务、导航快照与事件诊断。
+- 新增 `TFYSwiftUIKitRouteConfiguration` 与批量事务安装 API；页面可在自身文件中同时声明 Route、目标标识、工厂和根 Scope 关联。Demo 已按此模型重建，AppCoordinator 不再注册或构造具体页面。
+- 新增组件级 TabBar 单测和真机 UI 流程，覆盖自动选中目标 Scope、未知/重复 Scope、结果回传、Session 与事件时间线。
+- 修复恢复过程中后续页面失败、任务取消或原栈为空时留下半恢复导航状态的问题；UIKit、SwiftUI 与 Scoped Driver 现在通过页面实例级检查点原子回滚。
+- 自定义导航 Driver 若参与状态恢复，需要实现 `TFYSwiftNavigationCheckpointing`；存在模态页面时恢复会在修改导航栈前拒绝执行。
+- Command/Event 流默认改为各保留最新 64 条，并可通过 `TFYSwiftRouteSessionBuffering` 选择上限与溢出方向或显式使用无界模式。
+- 新增 `TFYSwiftTypedDestinationContext`、UIKit/SwiftUI `registerTyped` 与 Assembly 成对注册入口，使页面工厂也获得编译期 Input/Output/Command/Event 约束。
+- 修复 UIKit Sheet 返回 `UINavigationController` 时生命周期观察器干扰容器子控制器、导致内容页不显示的问题，同时保留交互关闭与外部关闭的取消语义。
+- 补充跨 Scope 恢复失败回滚、缓冲溢出和类型化页面注册回归测试，并加入 SwiftPM 与 iOS build-for-testing 的 CI 工作流。
+- 修复 Demo 列表内容穿透半透明 NavigationBar 与 TabBar 的问题，统一使用不透明容器外观并增加回归测试。
+
+### 发布关联
+
+- SwiftPM：使用 Git Tag `2.1.0`，客户端可使用 `.package(url: ..., from: "2.1.0")`。
+- CocoaPods：`TFYSwiftRouterKit.podspec` 与源码 Tag 同为 `2.1.0`。
+- Demo：Xcode 工程 `MARKETING_VERSION` 与组件版本保持为 `2.1.0`。
 
 ## 2.0.0 - 2026-09-12
 
@@ -23,7 +40,7 @@
 - 新增 Deep Link Parser 优先级、移除和注册信息查询。
 - 新增 `TFYSwiftTestRouter.Invocation` 详细记录、异步/按 Route 返回值 Provider 和 Session 交互访问。
 - 新增 SwiftPM 测试 Target，并明确 macOS 主机测试与 iOS UI Adapter 的构建边界。
-- 新增独立可操作的路由能力实验室、四 Tab 集成流程、0→1 中文指南、源码中文注释和 UI 回归用例。
+- 新增独立可操作的四 Tab Demo、0→1 中文指南、源码中文注释和 UI 回归用例。
 
 ### 修复
 

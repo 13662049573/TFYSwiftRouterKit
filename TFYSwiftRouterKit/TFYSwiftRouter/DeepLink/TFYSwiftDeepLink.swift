@@ -38,11 +38,17 @@ public protocol TFYSwiftDeepLinkParser: Sendable {
 /// 外部 URL 的允许范围；初始化时统一转换 Scheme/Host 为小写。
 public struct TFYSwiftDeepLinkPolicy: Sendable {
     /// 允许的协议集合，比较时使用小写。
-    public var allowedSchemes: Set<String>
+    public var allowedSchemes: Set<String> {
+        didSet { allowedSchemes = Set(allowedSchemes.map { $0.lowercased() }) }
+    }
     /// HTTP/HTTPS 允许的域名集合；自定义 Scheme 的 host 由 Parser 验证。
-    public var allowedHosts: Set<String>
+    public var allowedHosts: Set<String> {
+        didSet { allowedHosts = Set(allowedHosts.map { $0.lowercased() }) }
+    }
     /// URL 字符数上限；默认 2048。
-    public var maximumURLLength: Int
+    public var maximumURLLength: Int {
+        didSet { maximumURLLength = max(1, maximumURLLength) }
+    }
 
     /// 创建白名单策略；初始化时小写化 Scheme/Host，并限制 URL 长度至少为 1。
     public init(

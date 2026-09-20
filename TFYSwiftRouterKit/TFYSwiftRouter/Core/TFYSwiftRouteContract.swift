@@ -23,6 +23,48 @@ public protocol TFYSwiftSessionRouteContract: TFYSwiftRouteContract {
     associatedtype Event: Sendable
 }
 
+/// 页面工厂使用的强类型上下文，统一约束 Input 与最终 Output。
+@MainActor
+public struct TFYSwiftTypedDestinationContext<Route: TFYSwiftRouteContract> {
+    /// 原始上下文；需要访问底层交互对象时可使用。
+    public let context: TFYSwiftDestinationContext
+    /// 已按 Route 契约校验的输入。
+    public let input: Route.Input
+
+    public var routeContext: TFYSwiftRouteContext { context.routeContext }
+    public var presentation: TFYSwiftRoutePresentation { context.presentation }
+
+    public init(_ context: TFYSwiftDestinationContext) throws {
+        self.context = context
+        input = try context.input(as: Route.Input.self)
+    }
+
+    /// 返回契约声明的最终输出；当前请求未等待结果时抛错。
+    public func finish(_ output: Route.Output) throws {
+        guard let result = context.result else {
+            throw TFYSwiftRouteError.destinationUnavailable("当前路由请求没有结果接收方")
+        }
+        result.finish(with: output)
+    }
+
+    /// 取消结果等待并结束本次交互流。
+    public func cancel(_ error: Error = TFYSwiftRouteError.cancelled) {
+        context.interaction?.cancel(error)
+    }
+}
+
+public extension TFYSwiftTypedDestinationContext where Route: TFYSwiftSessionRouteContract {
+    /// 读取契约声明的命令流。
+    func commands() throws -> AsyncStream<Route.Command> {
+        try context.commands(of: Route.Command.self)
+    }
+
+    /// 发送契约声明的事件。
+    func send(_ event: Route.Event) throws {
+        try context.send(event)
+    }
+}
+
 public extension TFYSwiftRouting {
     /// Opens a route without repeating or manually matching its declared input/output types.
     /// 从 Route 契约推导输入/输出类型，调用者无需重复填写 expecting。

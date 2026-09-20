@@ -7,18 +7,27 @@ import Foundation
 @MainActor
 /// 只允许完成一次的结果句柄；完成或取消时释放内部回调捕获。
 public final class TFYSwiftRouteResult {
+    private enum PendingCompletion {
+        case none
+        case value(Any)
+    }
+
     /// 关联当前结果或事件的路由事务标识。
     public let transactionID: UUID
     private var isFinished = false
+    private var isCompletionEnabled: Bool
+    private var pendingCompletion = PendingCompletion.none
     private var finishOperation: ((Any) -> Void)?
     private var cancelOperation: ((Error) -> Void)?
 
     init(
         transactionID: UUID,
+        completionEnabled: Bool = true,
         finish: @escaping (Any) -> Void,
         cancel: @escaping (Error) -> Void
     ) {
         self.transactionID = transactionID
+        isCompletionEnabled = completionEnabled
         finishOperation = finish
         cancelOperation = cancel
     }
@@ -26,8 +35,25 @@ public final class TFYSwiftRouteResult {
     /// 结束当前结果或流；重复调用会被忽略。
     public func finish<Value: Sendable>(with value: Value) {
         guard !isFinished else { return }
+        guard isCompletionEnabled else {
+            guard case .none = pendingCompletion else { return }
+            pendingCompletion = .value(value)
+            return
+        }
+        complete(with: value)
+    }
+
+    func enableCompletion() {
+        guard !isFinished, !isCompletionEnabled else { return }
+        isCompletionEnabled = true
+        guard case .value(let value) = pendingCompletion else { return }
+        complete(with: value)
+    }
+
+    private func complete(with value: Any) {
         isFinished = true
         let operation = finishOperation
+        pendingCompletion = .none
         finishOperation = nil
         cancelOperation = nil
         operation?(value)
@@ -38,6 +64,7 @@ public final class TFYSwiftRouteResult {
         guard !isFinished else { return }
         isFinished = true
         let operation = cancelOperation
+        pendingCompletion = .none
         finishOperation = nil
         cancelOperation = nil
         operation?(error)
@@ -72,6 +99,21 @@ public protocol TFYSwiftNavigationDriver: AnyObject {
     func dismiss(in scope: TFYSwiftNavigationScopeID) async throws
     /// 关闭当前 Scope 的全部模态页面及其交互。
     func dismissAll(in scope: TFYSwiftNavigationScopeID) async throws
+}
+
+@MainActor
+/// 一次导航状态检查点；调用方必须且只能选择提交或回滚一次。
+public protocol TFYSwiftNavigationCheckpoint: AnyObject {
+    func commit()
+    func rollback()
+}
+
+@MainActor
+/// 支持原页面实例级回滚的导航驱动；状态恢复只接受实现此协议的驱动。
+public protocol TFYSwiftNavigationCheckpointing: TFYSwiftNavigationDriver {
+    func makeNavigationCheckpoint(
+        in scope: TFYSwiftNavigationScopeID
+    ) throws -> any TFYSwiftNavigationCheckpoint
 }
 
 public extension TFYSwiftNavigationDriver {

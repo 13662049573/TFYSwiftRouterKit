@@ -7,7 +7,7 @@ import Foundation
 /// Dispatches navigation mutations to an independent driver for each tab/flow scope.
 @MainActor
 /// 多容器分发驱动；查询未知 Scope 返回空结果，导航修改未知 Scope 抛错。
-public final class TFYSwiftScopedNavigationDriver: TFYSwiftNavigationDriver {
+public final class TFYSwiftScopedNavigationDriver: TFYSwiftNavigationDriver, TFYSwiftNavigationCheckpointing {
     private var drivers: [TFYSwiftNavigationScopeID: any TFYSwiftNavigationDriver] = [:]
 
     /// 创建空 Scope 分发器；必须先登记容器才能执行导航。
@@ -69,6 +69,19 @@ public final class TFYSwiftScopedNavigationDriver: TFYSwiftNavigationDriver {
     /// 返回可用于恢复的 root/push 地址顺序；内置驱动排除模态和自定义呈现。
     public func navigationRoutes(in scope: TFYSwiftNavigationScopeID) -> [TFYSwiftAnyRoute] {
         drivers[scope]?.navigationRoutes(in: scope) ?? []
+    }
+
+    /// 由目标 Scope 的具体驱动创建实例级检查点。
+    public func makeNavigationCheckpoint(
+        in scope: TFYSwiftNavigationScopeID
+    ) throws -> any TFYSwiftNavigationCheckpoint {
+        let driver = try driver(for: scope)
+        guard let checkpointing = driver as? any TFYSwiftNavigationCheckpointing else {
+            throw TFYSwiftRouteError.restorationFailed(
+                "Scope \(scope.rawValue) 的导航驱动不支持原子恢复"
+            )
+        }
+        return try checkpointing.makeNavigationCheckpoint(in: scope)
     }
 
     /// 回退指定层数；至少回退一层，最多回到当前容器根页。

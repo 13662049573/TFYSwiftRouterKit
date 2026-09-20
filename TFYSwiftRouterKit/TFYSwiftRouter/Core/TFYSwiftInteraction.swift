@@ -30,6 +30,47 @@ public struct TFYSwiftRoutePayload: @unchecked Sendable {
     }
 }
 
+/// Command/Event 流的缓冲策略；有界策略在生产环境可避免无人消费时无限占用内存。
+public enum TFYSwiftRouteBufferingPolicy: Sendable, Hashable {
+    /// 保留全部尚未消费的值，适合明确受控的短流程。
+    case unbounded
+    /// 达到上限后丢弃最旧值，保留最新状态或操作。
+    case bufferingNewest(Int)
+    /// 达到上限后丢弃新值，保留最早到达的操作。
+    case bufferingOldest(Int)
+
+    fileprivate func streamPolicy<Element>() -> AsyncStream<Element>.Continuation.BufferingPolicy {
+        switch self {
+        case .unbounded:
+            return .unbounded
+        case .bufferingNewest(let limit):
+            return .bufferingNewest(max(1, limit))
+        case .bufferingOldest(let limit):
+            return .bufferingOldest(max(1, limit))
+        }
+    }
+}
+
+/// 一次双向会话的命令与事件缓冲配置。
+public struct TFYSwiftRouteSessionBuffering: Sendable, Hashable {
+    public let commands: TFYSwiftRouteBufferingPolicy
+    public let events: TFYSwiftRouteBufferingPolicy
+
+    /// 默认各保留最近 64 条，避免生产会话在消费者缺席时无限增长。
+    public static let standard = Self(
+        commands: .bufferingNewest(64),
+        events: .bufferingNewest(64)
+    )
+
+    public init(
+        commands: TFYSwiftRouteBufferingPolicy = .bufferingNewest(64),
+        events: TFYSwiftRouteBufferingPolicy = .bufferingNewest(64)
+    ) {
+        self.commands = commands
+        self.events = events
+    }
+}
+
 /// Caller-to-destination command pipe. Commands can trigger refresh, selection, playback, etc.
 @MainActor
 /// 调用方向目标页面发送命令的流；同一流应由一个消费者读取。
@@ -43,11 +84,16 @@ public final class TFYSwiftRouteCommandChannel {
     private var isFinished = false
 
     /// 为指定命令类型创建缓冲流；消费者开始之前发送的命令会缓冲等待。
-    public init<Command: Sendable>(_ type: Command.Type = Command.self) {
+    public init<Command: Sendable>(
+        _ type: Command.Type = Command.self,
+        bufferingPolicy: TFYSwiftRouteBufferingPolicy = .bufferingNewest(64)
+    ) {
         commandTypeName = String(reflecting: Command.self)
         commandTypeID = ObjectIdentifier(Command.self)
         var continuation: AsyncStream<Command>.Continuation?
-        let stream = AsyncStream<Command> { continuation = $0 }
+        let stream = AsyncStream<Command>(bufferingPolicy: bufferingPolicy.streamPolicy()) {
+            continuation = $0
+        }
         sendOperation = { value in
             guard let command = value as? Command else { return }
             continuation?.yield(command)
@@ -101,11 +147,16 @@ public final class TFYSwiftRouteEventChannel {
     private var isFinished = false
 
     /// 为指定事件类型创建缓冲流；流程结束时必须 finish 以唤醒消费者。
-    public init<Event: Sendable>(_ type: Event.Type = Event.self) {
+    public init<Event: Sendable>(
+        _ type: Event.Type = Event.self,
+        bufferingPolicy: TFYSwiftRouteBufferingPolicy = .bufferingNewest(64)
+    ) {
         eventTypeName = String(reflecting: Event.self)
         eventTypeID = ObjectIdentifier(Event.self)
         var continuation: AsyncStream<Event>.Continuation?
-        let stream = AsyncStream<Event> { continuation = $0 }
+        let stream = AsyncStream<Event>(bufferingPolicy: bufferingPolicy.streamPolicy()) {
+            continuation = $0
+        }
         sendOperation = { value in
             guard let event = value as? Event else { return }
             continuation?.yield(event)

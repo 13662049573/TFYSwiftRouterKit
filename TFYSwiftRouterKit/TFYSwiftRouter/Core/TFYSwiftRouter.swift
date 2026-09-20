@@ -191,6 +191,8 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
     public let events: TFYSwiftRouteEventCenter
     /// 接收导航变更的平台驱动或 Scope 分发驱动。
     public let driver: any TFYSwiftNavigationDriver
+    /// 新会话使用的命令与事件缓冲策略。
+    public let sessionBuffering: TFYSwiftRouteSessionBuffering
     /// 单个事务允许的最大重定向次数，防止地址间循环跳转。
     public var maximumRedirectDepth = 8
     /// 单个事务允许的最大挂起恢复次数，防止条件一直未满足。
@@ -206,6 +208,7 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
     /// 按事务 ID 查询的最近状态，不应当作为导航栈的数据源。
     public private(set) var transactionStates: [UUID: TFYSwiftRouteTransactionState] = [:]
     private var pendingResults: [UUID: TFYSwiftRouteResult] = [:]
+    private var executionTasks: [UUID: Task<Void, Never>] = [:]
     private var transactionOrder: [UUID] = []
     private var activeTransactions: [UUID: TFYSwiftRouteTransaction] = [:]
 
@@ -215,23 +218,30 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
         interceptors: TFYSwiftInterceptorPipeline,
         events: TFYSwiftRouteEventCenter,
         driver: any TFYSwiftNavigationDriver,
-        defaultScope: TFYSwiftNavigationScopeID = .main
+        defaultScope: TFYSwiftNavigationScopeID = .main,
+        sessionBuffering: TFYSwiftRouteSessionBuffering = .standard
     ) {
         self.defaultScope = defaultScope
         self.registry = registry
         self.interceptors = interceptors
         self.events = events
         self.driver = driver
+        self.sessionBuffering = sessionBuffering
     }
 
     /// 注入驱动与可选的完整基础设施；便利初始化器自动创建注册表、事件中心与拦截流水线。
-    public convenience init(driver: any TFYSwiftNavigationDriver, defaultScope: TFYSwiftNavigationScopeID = .main) {
+    public convenience init(
+        driver: any TFYSwiftNavigationDriver,
+        defaultScope: TFYSwiftNavigationScopeID = .main,
+        sessionBuffering: TFYSwiftRouteSessionBuffering = .standard
+    ) {
         self.init(
             registry: TFYSwiftRouteRegistry(),
             interceptors: TFYSwiftInterceptorPipeline(),
             events: TFYSwiftRouteEventCenter(),
             driver: driver,
-            defaultScope: defaultScope
+            defaultScope: defaultScope,
+            sessionBuffering: sessionBuffering
         )
     }
 
@@ -393,8 +403,14 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
             metadata: metadata,
             deduplication: deduplication
         )
-        let commandChannel = TFYSwiftRouteCommandChannel(commands)
-        let eventChannel = TFYSwiftRouteEventChannel(events)
+        let commandChannel = TFYSwiftRouteCommandChannel(
+            commands,
+            bufferingPolicy: sessionBuffering.commands
+        )
+        let eventChannel = TFYSwiftRouteEventChannel(
+            events,
+            bufferingPolicy: sessionBuffering.events
+        )
         let eventStream: AsyncStream<Event>
         do {
             eventStream = try eventChannel.stream(of: events)
@@ -432,6 +448,7 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
             try await withCheckedThrowingContinuation { continuation in
                 let result = TFYSwiftRouteResult(
                     transactionID: transaction.id,
+                    completionEnabled: false,
                     finish: { [weak self, weak interaction] value in
                         let effectiveTransaction = self?.activeTransactions[transaction.id] ?? transaction
                         self?.pendingResults.removeValue(forKey: transaction.id)
@@ -452,6 +469,7 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
                     cancel: { [weak self, weak interaction] error in
                         let effectiveTransaction = self?.activeTransactions[transaction.id] ?? transaction
                         self?.pendingResults.removeValue(forKey: transaction.id)
+                        self?.executionTasks.removeValue(forKey: transaction.id)?.cancel()
                         interaction?.finishChannels()
                         interaction?.detachResult()
                         self?.fail(effectiveTransaction, with: error)
@@ -461,17 +479,20 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
                 interaction.attach(result: result)
                 pendingResults[transaction.id] = result
 
-                Task { @MainActor [weak self] in
+                let executionTask = Task { @MainActor [weak self] in
                     guard let self else {
                         result.cancel()
                         return
                     }
+                    defer { self.executionTasks.removeValue(forKey: transaction.id) }
                     do {
                         _ = try await self.execute(transaction, interaction: interaction)
+                        result.enableCompletion()
                     } catch {
                         result.cancel(error)
                     }
                 }
+                executionTasks[transaction.id] = executionTask
             }
         } onCancel: { [router = self, transactionID = transaction.id] in
             Task { @MainActor in
@@ -558,7 +579,9 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
         while true {
             try Task.checkCancellation()
             transition(transaction, to: .intercepting, event: .interceptStarted)
-            switch await interceptors.run(transaction) {
+            let interception = await interceptors.run(transaction)
+            try Task.checkCancellation()
+            switch interception {
             case .proceed:
                 break
             case .redirect(let route):
@@ -575,6 +598,7 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
                 guard try await suspension.resume() else {
                     throw TFYSwiftRouteError.suspensionCancelled(suspension.reason)
                 }
+                try Task.checkCancellation()
                 emit(transaction, .resumed)
                 continue
             case .reject(let error):
@@ -583,18 +607,24 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
             break
         }
 
+        try Task.checkCancellation()
         switch transaction.deduplication {
         case .ignoreIfTop where driver.isTop(transaction.route, in: transaction.context.scope):
-            if interaction?.result != nil { throw TFYSwiftRouteError.destinationUnavailable("去重策略未创建新页面，无法等待返回值") }
+            if interaction != nil { throw TFYSwiftRouteError.destinationUnavailable("去重策略复用已有页面时无法绑定新的交互") }
             emit(transaction, .deduplicated, message: "ignoreIfTop")
             return transaction
         case .singleTop where driver.isTop(transaction.route, in: transaction.context.scope):
-            if interaction?.result != nil { throw TFYSwiftRouteError.destinationUnavailable("去重策略未创建新页面，无法等待返回值") }
+            if interaction != nil { throw TFYSwiftRouteError.destinationUnavailable("去重策略复用已有页面时无法绑定新的交互") }
             emit(transaction, .deduplicated, message: "singleTop")
             return transaction
         case .singleTask:
+            if interaction != nil {
+                if driver.routes(in: transaction.context.scope).contains(transaction.route) {
+                    throw TFYSwiftRouteError.destinationUnavailable("复用已有页面时无法绑定新的交互")
+                }
+                break
+            }
             if try await driver.activate(transaction.route, in: transaction.context.scope) {
-                if interaction?.result != nil { throw TFYSwiftRouteError.destinationUnavailable("复用已有页面时无法绑定新的返回值") }
                 emit(transaction, .deduplicated, message: "singleTask")
                 return transaction
             }
@@ -604,14 +634,17 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
 
         transition(transaction, to: .resolving, event: nil)
         let destination = try await registry.resolve(transaction.route, context: transaction.context)
+        try Task.checkCancellation()
         emit(transaction, .resolved, message: destination.identifier)
         transition(transaction, to: .presenting, event: .presentStarted)
+        try Task.checkCancellation()
         try await driver.present(
             destination: destination,
             route: transaction.route,
             transaction: transaction,
             interaction: interaction
         )
+        try Task.checkCancellation()
         transition(transaction, to: .presented, event: .presented)
         return transaction
     }
@@ -622,6 +655,7 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
         event: TFYSwiftRouteEventName?,
         message: String? = nil
     ) {
+        guard activeTransactions[transaction.id] != nil else { return }
         if transactionStates[transaction.id] == nil {
             transactionOrder.append(transaction.id)
         }

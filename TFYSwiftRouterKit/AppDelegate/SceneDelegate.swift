@@ -10,38 +10,33 @@ import UIKit
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     var window: UIWindow?
-    private var appCoordinator: TFYSwiftDemoAppCoordinator?
+    private var appCoordinator: TFYDemoAppCoordinator?
+
 
     func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions) {
         guard let windowScene = scene as? UIWindowScene else { return }
         let appWindow = UIWindow(windowScene: windowScene)
         window = appWindow
         do {
-            let coordinator = try TFYSwiftDemoAppCoordinator()
+            let coordinator = try TFYDemoAppCoordinator()
             appCoordinator = coordinator
             appWindow.rootViewController = coordinator.tabBarController
             appWindow.makeKeyAndVisible()
 
-            // 冷启动既可能来自自定义 Scheme，也可能来自 Universal Link。
-            let initialURL = connectionOptions.urlContexts.first?.url
+            let launchURL = connectionOptions.urlContexts.first?.url
                 ?? connectionOptions.userActivities.first(where: {
                     $0.activityType == NSUserActivityTypeBrowsingWeb
                 })?.webpageURL
-            Task { @MainActor [weak self, weak coordinator] in
+            Task { @MainActor [weak self] in
                 do {
-                    guard let coordinator else { return }
                     try await coordinator.start()
-                    if let initialURL { try await coordinator.handleExternalURL(initialURL) }
+                    if let launchURL { try await coordinator.handleExternalURL(launchURL) }
                 } catch {
                     self?.showError(title: "Demo 启动失败", error: error)
                 }
             }
         } catch {
-            appWindow.rootViewController = TFYSwiftDemoDetailViewController(
-                heading: "Demo 装配失败",
-                message: error.localizedDescription,
-                color: .systemRed
-            )
+            appWindow.rootViewController = makeFailureViewController(error)
             appWindow.makeKeyAndVisible()
         }
     }
@@ -69,6 +64,25 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         let alert = UIAlertController(title: title, message: error.localizedDescription, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "知道了", style: .default))
         window?.rootViewController?.present(alert, animated: true)
+    }
+
+    private func makeFailureViewController(_ error: Error) -> UIViewController {
+        let controller = UIViewController()
+        controller.view.backgroundColor = .systemBackground
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.font = .preferredFont(forTextStyle: .body)
+        label.textColor = .systemRed
+        label.numberOfLines = 0
+        label.textAlignment = .center
+        label.text = "Demo 装配失败\n\n\(error.localizedDescription)"
+        controller.view.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: controller.view.readableContentGuide.leadingAnchor),
+            label.trailingAnchor.constraint(equalTo: controller.view.readableContentGuide.trailingAnchor),
+            label.centerYAnchor.constraint(equalTo: controller.view.centerYAnchor)
+        ])
+        return controller
     }
 
     func sceneDidDisconnect(_ scene: UIScene) {

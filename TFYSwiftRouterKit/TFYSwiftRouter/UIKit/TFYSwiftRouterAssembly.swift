@@ -20,6 +20,10 @@ public final class TFYSwiftRouterAssembly {
     public let driver: TFYSwiftUIKitNavigationDriver
     /// 按 Scope 路由到独立导航容器的分发驱动。
     public let scopedDriver: TFYSwiftScopedNavigationDriver
+    /// 每个 Scope 对应的 UIKit 驱动，供宿主配置 custom/newWindow 等平台呈现。
+    public private(set) var navigationDrivers: [TFYSwiftNavigationScopeID: TFYSwiftUIKitNavigationDriver]
+    /// Tab 应用使用的 Scope 到选中项桥接；单导航栈组装时为 nil。
+    public let tabBarDriver: TFYSwiftTabBarNavigationDriver?
     /// 共享的业务拦截流水线。
     public let interceptors: TFYSwiftInterceptorPipeline
     /// 事件中心、历史记录或会话事件流；具体语义由所属类型决定。
@@ -30,7 +34,8 @@ public final class TFYSwiftRouterAssembly {
     /// 为初始导航容器组装完整 UIKit 路由环境，可显式指定初始 Scope。
     public init(
         navigationController: UINavigationController,
-        initialScope: TFYSwiftNavigationScopeID = .main
+        initialScope: TFYSwiftNavigationScopeID = .main,
+        sessionBuffering: TFYSwiftRouteSessionBuffering = .standard
     ) {
         routes = TFYSwiftRouteRegistry()
         destinations = TFYSwiftUIKitDestinationRegistry()
@@ -40,6 +45,8 @@ public final class TFYSwiftRouterAssembly {
         )
         scopedDriver = TFYSwiftScopedNavigationDriver()
         try? scopedDriver.register(driver, for: initialScope, replacingExisting: false)
+        navigationDrivers = [initialScope: driver]
+        tabBarDriver = nil
         interceptors = TFYSwiftInterceptorPipeline()
         events = TFYSwiftRouteEventCenter()
         router = TFYSwiftRouter(
@@ -47,7 +54,70 @@ public final class TFYSwiftRouterAssembly {
             interceptors: interceptors,
             events: events,
             driver: scopedDriver,
-            defaultScope: initialScope
+            defaultScope: initialScope,
+            sessionBuffering: sessionBuffering
+        )
+    }
+
+    /// 组装多 Tab 路由环境；目标 Scope 的导航会先选中对应 Tab。
+    public init(
+        tabBarController: UITabBarController,
+        tabs: [TFYSwiftTabBarScope],
+        initialScope: TFYSwiftNavigationScopeID,
+        sessionBuffering: TFYSwiftRouteSessionBuffering = .standard
+    ) throws {
+        guard !tabs.isEmpty else {
+            throw TFYSwiftRouteError.presentationFailed("At least one tab is required")
+        }
+
+        let routes = TFYSwiftRouteRegistry()
+        let destinations = TFYSwiftUIKitDestinationRegistry()
+        let scopedDriver = TFYSwiftScopedNavigationDriver()
+        tabBarController.setViewControllers(tabs.map(\.navigationController), animated: false)
+
+        var drivers: [TFYSwiftNavigationScopeID: TFYSwiftUIKitNavigationDriver] = [:]
+        for tab in tabs {
+            let navigationDriver = TFYSwiftUIKitNavigationDriver(
+                navigationController: tab.navigationController,
+                destinations: destinations
+            )
+            try scopedDriver.register(
+                navigationDriver,
+                for: tab.scope,
+                replacingExisting: false
+            )
+            drivers[tab.scope] = navigationDriver
+        }
+        guard let initialDriver = drivers[initialScope] else {
+            throw TFYSwiftRouteError.scopeUnavailable(initialScope.rawValue)
+        }
+
+        let tabBarDriver = TFYSwiftTabBarNavigationDriver(
+            tabBarController: tabBarController,
+            scopedDriver: scopedDriver
+        )
+        for (index, tab) in tabs.enumerated() {
+            try tabBarDriver.register(tab.scope, at: index)
+        }
+        try tabBarDriver.select(initialScope)
+
+        let interceptors = TFYSwiftInterceptorPipeline()
+        let events = TFYSwiftRouteEventCenter()
+        self.routes = routes
+        self.destinations = destinations
+        driver = initialDriver
+        self.scopedDriver = scopedDriver
+        navigationDrivers = drivers
+        self.tabBarDriver = tabBarDriver
+        self.interceptors = interceptors
+        self.events = events
+        router = TFYSwiftRouter(
+            registry: routes,
+            interceptors: interceptors,
+            events: events,
+            driver: tabBarDriver,
+            defaultScope: initialScope,
+            sessionBuffering: sessionBuffering
         )
     }
 
@@ -64,6 +134,7 @@ public final class TFYSwiftRouterAssembly {
             destinations: destinations
         )
         try scopedDriver.register(driver, for: scope, replacingExisting: replacingExisting)
+        navigationDrivers[scope] = driver
         return driver
     }
 
@@ -81,6 +152,28 @@ public final class TFYSwiftRouterAssembly {
                     return TFYSwiftDestinationDescriptor(identifier: destinationID)
                 }
                 try destinations.register(identifier: destinationID, routeType: routeType, factory: factory)
+            }
+        }
+    }
+
+    /// 成对登记契约 Route 与强类型 UIKit 页面工厂；任一步失败都会回滚。
+    public func registerTyped<R: TFYSwiftRouteContract>(
+        _ routeType: R.Type,
+        destinationID: String = String(reflecting: R.self),
+        resolver: (@MainActor (R, TFYSwiftRouteContext) async throws -> TFYSwiftDestinationDescriptor)? = nil,
+        factory: @escaping @MainActor (R, TFYSwiftTypedDestinationContext<R>) throws -> UIViewController
+    ) throws {
+        try routes.performRegistrationTransaction {
+            try destinations.performRegistrationTransaction {
+                try routes.register(routeType) { route, context in
+                    if let resolver { return try await resolver(route, context) }
+                    return TFYSwiftDestinationDescriptor(identifier: destinationID)
+                }
+                try destinations.registerTyped(
+                    identifier: destinationID,
+                    routeType: routeType,
+                    factory: factory
+                )
             }
         }
     }

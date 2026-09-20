@@ -36,6 +36,22 @@ public final class TFYSwiftUIKitDestinationRegistry {
         }
     }
 
+    /// 按 Route 契约登记页面工厂，工厂直接获得已校验的 Input/Output 上下文。
+    public func registerTyped<R: TFYSwiftRouteContract>(
+        identifier: String,
+        routeType: R.Type,
+        replacingExisting: Bool = false,
+        factory: @escaping @MainActor (R, TFYSwiftTypedDestinationContext<R>) throws -> UIViewController
+    ) throws {
+        try register(
+            identifier: identifier,
+            routeType: routeType,
+            replacingExisting: replacingExisting
+        ) { route, context in
+            try factory(route, TFYSwiftTypedDestinationContext(context))
+        }
+    }
+
     /// 将 SwiftUI View 工厂包装为 UIHostingController 后登记到 UIKit 目标表。
     public func registerSwiftUI<R: TFYSwiftRoute, Content: View>(
         identifier: String,

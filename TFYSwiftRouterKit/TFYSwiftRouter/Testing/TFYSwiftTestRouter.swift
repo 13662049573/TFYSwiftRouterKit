@@ -12,6 +12,8 @@ import TFYSwiftRouterCore
 public final class TFYSwiftTestRouter: TFYSwiftRouting {
     /// 测试中的缺省 Scope，可与生产流程配置一致。
     public let defaultScope: TFYSwiftNavigationScopeID
+    /// 与生产 Router 一致的新会话缓冲策略。
+    public let sessionBuffering: TFYSwiftRouteSessionBuffering
     /// 记录一次调用的导航动作、Scope、来源、Metadata 与输入类型名；不保存实际输入值。
     public struct Invocation: Equatable {
         /// 本次协议调用的导航动作。
@@ -50,7 +52,13 @@ public final class TFYSwiftTestRouter: TFYSwiftRouting {
         let resultType: ObjectIdentifier
     }
 
-    public init(defaultScope: TFYSwiftNavigationScopeID = .main) { self.defaultScope = defaultScope }
+    public init(
+        defaultScope: TFYSwiftNavigationScopeID = .main,
+        sessionBuffering: TFYSwiftRouteSessionBuffering = .standard
+    ) {
+        self.defaultScope = defaultScope
+        self.sessionBuffering = sessionBuffering
+    }
 
     /// 配置结果 Provider；指定地址的 Provider 优先于仅按结果类型登记的默认 Provider。
     public func provide<Result: Sendable>(_ type: Result.Type, result: @escaping () throws -> Result) {
@@ -169,8 +177,14 @@ public final class TFYSwiftTestRouter: TFYSwiftRouting {
         expecting: Output.Type
     ) -> TFYSwiftRouteSession<Command, Event, Output> {
         recordOpen(route, inputTypeName: String(reflecting: Input.self), presentation: presentation, source: source, scope: scope, metadata: metadata, deduplication: deduplication)
-        let commandChannel = TFYSwiftRouteCommandChannel(commands)
-        let eventChannel = TFYSwiftRouteEventChannel(events)
+        let commandChannel = TFYSwiftRouteCommandChannel(
+            commands,
+            bufferingPolicy: sessionBuffering.commands
+        )
+        let eventChannel = TFYSwiftRouteEventChannel(
+            events,
+            bufferingPolicy: sessionBuffering.events
+        )
         let interaction = TFYSwiftRouteInteraction(
             input: TFYSwiftRoutePayload(input),
             commands: commandChannel,

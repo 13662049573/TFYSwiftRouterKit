@@ -75,6 +75,22 @@ public final class TFYSwiftSwiftUIDestinationRegistry {
         }
     }
 
+    /// 按 Route 契约登记 View 工厂，工厂直接获得已校验的 Input/Output 上下文。
+    public func registerTyped<R: TFYSwiftRouteContract, Content: View>(
+        identifier: String,
+        routeType: R.Type,
+        replacingExisting: Bool = false,
+        factory: @escaping @MainActor (R, TFYSwiftTypedDestinationContext<R>) throws -> Content
+    ) throws {
+        try register(
+            identifier: identifier,
+            routeType: routeType,
+            replacingExisting: replacingExisting
+        ) { route, context in
+            try factory(route, TFYSwiftTypedDestinationContext(context))
+        }
+    }
+
     /// 检查指定类型或标识是否已经登记。
     public func contains(_ identifier: String) -> Bool { factories[identifier] != nil }
 
@@ -118,7 +134,7 @@ public final class TFYSwiftSwiftUIDestinationRegistry {
 /// Native NavigationStack state driver for pure SwiftUI applications.
 @MainActor
 /// 将导航请求转换成可观察的 SwiftUI 状态。
-public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNavigationDriver {
+public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNavigationDriver, TFYSwiftNavigationCheckpointing {
     public typealias CustomPresentation = @MainActor (TFYSwiftSwiftUINavigationEntry) async throws -> Void
 
     /// 当前显式根路由；为空时由 RouterHost 的默认 root 闭包提供内容。
@@ -134,6 +150,34 @@ public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNa
     public let destinations: TFYSwiftSwiftUIDestinationRegistry
     private var customPresentations: [String: CustomPresentation] = [:]
     private var newWindowPresentation: CustomPresentation?
+    private struct CheckpointState {
+        let id: UUID
+        let rootEntry: TFYSwiftSwiftUINavigationEntry?
+        let path: [TFYSwiftSwiftUINavigationEntry]
+    }
+    private final class Checkpoint: TFYSwiftNavigationCheckpoint {
+        private weak var driver: TFYSwiftSwiftUINavigationDriver?
+        private let id: UUID
+        private var isResolved = false
+
+        init(driver: TFYSwiftSwiftUINavigationDriver, id: UUID) {
+            self.driver = driver
+            self.id = id
+        }
+
+        func commit() {
+            guard !isResolved else { return }
+            isResolved = true
+            driver?.resolveCheckpoint(id: id, commit: true)
+        }
+
+        func rollback() {
+            guard !isResolved else { return }
+            isResolved = true
+            driver?.resolveCheckpoint(id: id, commit: false)
+        }
+    }
+    private var checkpointState: CheckpointState?
 
     /// 创建原生导航状态；可注入共享工厂表或使用默认空表。
     public init(destinations: TFYSwiftSwiftUIDestinationRegistry) {
@@ -165,6 +209,16 @@ public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNa
         guard destinations.contains(destination.identifier) else {
             throw TFYSwiftRouteError.destinationNotRegistered(destination.identifier)
         }
+        if checkpointState != nil {
+            guard sheet == nil, fullScreen == nil else {
+                throw TFYSwiftRouteError.restorationFailed("恢复期间出现了新的模态页面")
+            }
+            switch transaction.presentation {
+            case .automatic, .push, .replace, .root: break
+            default:
+                throw TFYSwiftRouteError.restorationFailed("恢复检查点只支持 root/push 导航")
+            }
+        }
         var entry = TFYSwiftSwiftUINavigationEntry(
             destination: destination,
             route: route,
@@ -184,15 +238,17 @@ public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNa
             fullScreen = entry
         case .replace:
             if path.isEmpty {
-                rootEntry?.interaction?.cancel()
+                if checkpointState == nil { rootEntry?.interaction?.cancel() }
                 rootEntry = entry
             } else {
-                path[path.count - 1].interaction?.cancel()
+                if checkpointState == nil { path[path.count - 1].interaction?.cancel() }
                 path[path.count - 1] = entry
             }
         case .root:
-            cancel(entries: path)
-            rootEntry?.interaction?.cancel()
+            if checkpointState == nil {
+                cancel(entries: path)
+                rootEntry?.interaction?.cancel()
+            }
             sheet?.interaction?.cancel()
             fullScreen?.interaction?.cancel()
             rootEntry = entry
@@ -217,7 +273,12 @@ public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNa
 
     /// 尝试激活已有地址；命中时返回 true，并按驱动语义移除其上的页面。
     public func activate(_ route: TFYSwiftAnyRoute, in scope: TFYSwiftNavigationScopeID) async throws -> Bool {
-        if fullScreen?.route == route || sheet?.route == route { return true }
+        if fullScreen?.route == route { return true }
+        if sheet?.route == route {
+            fullScreen?.interaction?.cancel()
+            fullScreen = nil
+            return true
+        }
         if rootEntry?.route == route {
             fullScreen?.interaction?.cancel()
             sheet?.interaction?.cancel()
@@ -252,6 +313,21 @@ public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNa
         var routes = rootEntry.map { [$0.route] } ?? []
         routes.append(contentsOf: path.map(\.route))
         return routes
+    }
+
+    /// 保存当前 root/path 页面实例；存在模态页面时拒绝开始恢复。
+    public func makeNavigationCheckpoint(
+        in scope: TFYSwiftNavigationScopeID
+    ) throws -> any TFYSwiftNavigationCheckpoint {
+        guard checkpointState == nil else {
+            throw TFYSwiftRouteError.restorationFailed("SwiftUI 导航已有未完成的恢复事务")
+        }
+        guard sheet == nil, fullScreen == nil else {
+            throw TFYSwiftRouteError.restorationFailed("恢复前请先关闭当前 Scope 的模态页面")
+        }
+        let id = UUID()
+        checkpointState = CheckpointState(id: id, rootEntry: rootEntry, path: path)
+        return Checkpoint(driver: self, id: id)
     }
 
     /// 回退指定层数；至少回退一层，最多回到当前容器根页。
@@ -293,24 +369,45 @@ public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNa
     /// 接收 NavigationStack 的用户回退结果，并取消已从路径中移除的交互。
     func updatePath(_ newPath: [TFYSwiftSwiftUINavigationEntry]) {
         let retainedIDs = Set(newPath.map(\.id))
-        cancel(entries: path.filter { !retainedIDs.contains($0.id) })
+        let protectedIDs = Set(checkpointState?.path.map(\.id) ?? [])
+        cancel(entries: path.filter {
+            !retainedIDs.contains($0.id) && !protectedIDs.contains($0.id)
+        })
         path = newPath
     }
 
     /// 同步 Sheet 关闭后的状态并取消尚未完成的交互。
-    func sheetDidDismiss() {
+    func sheetDidDismiss(_ id: UUID) {
+        guard sheet?.id == id else { return }
         sheet?.interaction?.cancel()
         sheet = nil
     }
 
     /// 同步全屏弹层关闭后的状态并取消尚未完成的交互。
-    func fullScreenDidDismiss() {
+    func fullScreenDidDismiss(_ id: UUID) {
+        guard fullScreen?.id == id else { return }
         fullScreen?.interaction?.cancel()
         fullScreen = nil
     }
 
     private func cancel(entries: [TFYSwiftSwiftUINavigationEntry]) {
         entries.forEach { $0.interaction?.cancel() }
+    }
+
+    private func resolveCheckpoint(id: UUID, commit: Bool) {
+        guard let checkpoint = checkpointState, checkpoint.id == id else { return }
+        let previousEntries = [checkpoint.rootEntry].compactMap { $0 } + checkpoint.path
+        let currentEntries = [rootEntry].compactMap { $0 } + path
+        if commit {
+            let retainedIDs = Set(currentEntries.map(\.id))
+            cancel(entries: previousEntries.filter { !retainedIDs.contains($0.id) })
+        } else {
+            let retainedIDs = Set(previousEntries.map(\.id))
+            cancel(entries: currentEntries.filter { !retainedIDs.contains($0.id) })
+            rootEntry = checkpoint.rootEntry
+            path = checkpoint.path
+        }
+        checkpointState = nil
     }
 }
 
@@ -319,6 +416,10 @@ public struct TFYSwiftSwiftUIRouterHost<Root: View>: View {
     /// 错误展示由 App 注入，组件不绑定图标、主题、文案或资源包。
     public typealias ErrorContent = @MainActor (Error) -> AnyView
     @ObservedObject private var driver: TFYSwiftSwiftUINavigationDriver
+    @State private var presentedSheetID: UUID?
+    @State private var presentedFullScreenID: UUID?
+    @State private var dismissingSheetID: UUID?
+    @State private var dismissingFullScreenID: UUID?
     private let root: () -> Root
     private let errorContent: ErrorContent
 
@@ -345,16 +446,34 @@ public struct TFYSwiftSwiftUIRouterHost<Root: View>: View {
             .navigationDestination(for: TFYSwiftSwiftUINavigationEntry.self) { destination($0) }
         }
         .sheet(
-            item: Binding(get: { driver.sheet }, set: { if $0 == nil { driver.sheetDidDismiss() } }),
-            onDismiss: { driver.sheetDidDismiss() }
+            item: Binding(get: { driver.sheet }, set: {
+                if $0 == nil, let presentedSheetID {
+                    dismissingSheetID = presentedSheetID
+                    driver.sheetDidDismiss(presentedSheetID)
+                }
+            }),
+            onDismiss: {
+                if let dismissingSheetID { driver.sheetDidDismiss(dismissingSheetID) }
+                dismissingSheetID = nil
+            }
         ) { entry in
             configuredSheet(destination(entry), entry: entry)
+                .onAppear { presentedSheetID = entry.id }
         }
         .fullScreenCover(
-            item: Binding(get: { driver.fullScreen }, set: { if $0 == nil { driver.fullScreenDidDismiss() } }),
-            onDismiss: { driver.fullScreenDidDismiss() }
+            item: Binding(get: { driver.fullScreen }, set: {
+                if $0 == nil, let presentedFullScreenID {
+                    dismissingFullScreenID = presentedFullScreenID
+                    driver.fullScreenDidDismiss(presentedFullScreenID)
+                }
+            }),
+            onDismiss: {
+                if let dismissingFullScreenID { driver.fullScreenDidDismiss(dismissingFullScreenID) }
+                dismissingFullScreenID = nil
+            }
         ) { entry in
             destination(entry)
+                .onAppear { presentedFullScreenID = entry.id }
         }
     }
 

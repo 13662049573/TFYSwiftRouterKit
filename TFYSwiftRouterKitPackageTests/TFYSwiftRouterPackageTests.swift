@@ -14,6 +14,18 @@ final class TFYSwiftRouterPackageTests: XCTestCase {
 
     private struct BinaryRoute: TFYSwiftRoute { let bytes: [UInt8] }
 
+    private enum UnregisteredRoute: String, Codable, TFYSwiftRoute {
+        case detail
+    }
+
+    private struct DeepLinkParser: TFYSwiftDeepLinkParser {
+        let identifier = "package-tests"
+
+        func parse(_ request: TFYSwiftDeepLinkRequest) async throws -> TFYSwiftAnyRoute? {
+            TFYSwiftAnyRoute(Route.detail)
+        }
+    }
+
     /// 不依赖 UI 的边界回归：相同协议可注册多个命名实例，事务按复合键回滚。
     @MainActor
     func testServiceNamespacesRemainIndependent() throws {
@@ -85,6 +97,76 @@ final class TFYSwiftRouterPackageTests: XCTestCase {
         XCTAssertEqual(try registry.route(from: descriptor).cast(to: Address.self), route)
     }
 
+    func testDeepLinkPolicyNormalizesValuesAssignedAfterInitialization() async throws {
+        var policy = TFYSwiftDeepLinkPolicy(allowedSchemes: [])
+        policy.allowedSchemes.insert("HTTPS")
+        policy.allowedHosts.insert("ROUTER.EXAMPLE.COM")
+        let engine = TFYSwiftDeepLinkEngine(policy: policy)
+        await engine.add(DeepLinkParser())
+
+        let route = try await engine.route(for: TFYSwiftDeepLinkRequest(
+            url: try XCTUnwrap(URL(string: "https://router.example.com/detail"))
+        ))
+
+        XCTAssertEqual(route, TFYSwiftAnyRoute(Route.detail))
+    }
+
+    func testDeepLinkPolicyKeepsMaximumURLLengthPositiveAfterMutation() {
+        var policy = TFYSwiftDeepLinkPolicy(allowedSchemes: ["https"])
+        policy.maximumURLLength = 0
+        XCTAssertEqual(policy.maximumURLLength, 1)
+    }
+
+    @MainActor
+    func testInteractionChannelsApplyConfiguredOverflowPolicy() async throws {
+        let newest = TFYSwiftRouteCommandChannel(
+            Int.self,
+            bufferingPolicy: .bufferingNewest(2)
+        )
+        try newest.send(1)
+        try newest.send(2)
+        try newest.send(3)
+        newest.finish()
+        var newestValues: [Int] = []
+        for await value in try newest.stream(of: Int.self) { newestValues.append(value) }
+        XCTAssertEqual(newestValues, [2, 3])
+
+        let oldest = TFYSwiftRouteEventChannel(
+            Int.self,
+            bufferingPolicy: .bufferingOldest(2)
+        )
+        try oldest.send(1)
+        try oldest.send(2)
+        try oldest.send(3)
+        oldest.finish()
+        var oldestValues: [Int] = []
+        for await value in try oldest.stream(of: Int.self) { oldestValues.append(value) }
+        XCTAssertEqual(oldestValues, [1, 2])
+    }
+
+    @MainActor
+    func testTypedDestinationContextValidatesInputAndFinishesOutput() throws {
+        var receivedOutput: String?
+        let result = TFYSwiftRouteResult(
+            transactionID: UUID(),
+            finish: { receivedOutput = $0 as? String },
+            cancel: { _ in }
+        )
+        let context = TFYSwiftDestinationContext(
+            routeContext: TFYSwiftRouteContext(),
+            presentation: .sheet(),
+            interaction: TFYSwiftRouteInteraction(
+                input: TFYSwiftRoutePayload("input"),
+                result: result
+            )
+        )
+
+        let typed = try TFYSwiftTypedDestinationContext<ChoiceRoute>(context)
+        XCTAssertEqual(typed.input, "input")
+        try typed.finish("output")
+        XCTAssertEqual(receivedOutput, "output")
+    }
+
     /// 防止 App 资源、固定业务地址或 Demo 类型重新渗入可发布源码。
     func testRuntimeSourcesDoNotDependOnAppResources() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
@@ -102,14 +184,65 @@ final class TFYSwiftRouterPackageTests: XCTestCase {
         XCTAssertGreaterThan(count, 0)
         XCTAssertEqual(TFYSwiftRouteError.timeout.code, "timeout")
     }
+
+    /// 组合根只能装配模块与容器，具体页面必须留在 Destination 工厂中。
+    func testDemoCoordinatorDoesNotConstructConcretePages() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let coordinator = root.appendingPathComponent(
+            "TFYSwiftRouterKit/ClassDemo/App/TFYDemoAppCoordinator.swift"
+        )
+        let source = try String(contentsOf: coordinator, encoding: .utf8)
+
+        XCTAssertTrue(source.contains("registerConfigurations"))
+        XCTAssertTrue(source.contains("TFYDemoRouteCatalog"))
+        for forbidden in [
+            "makeRootViewController",
+            "registerDestinations",
+            "TFYDemoMenuViewController",
+            "TFYDemoStackViewController",
+            "TFYDemoTimelineViewController",
+            "TFYDemoDetailViewController",
+            "TFYDemoPickerViewController",
+            "TFYDemoSessionViewController"
+        ] {
+            XCTAssertFalse(source.contains(forbidden), "Coordinator 泄漏了具体页面：\(forbidden)")
+        }
+    }
     private enum Route: String, Codable, TFYSwiftRoute {
         case root
         case detail
     }
 
     @MainActor
-    private final class Driver: TFYSwiftNavigationDriver {
+    private final class Checkpoint: TFYSwiftNavigationCheckpoint {
+        private var commitOperation: (() -> Void)?
+        private var rollbackOperation: (() -> Void)?
+
+        init(commit: @escaping () -> Void, rollback: @escaping () -> Void) {
+            commitOperation = commit
+            rollbackOperation = rollback
+        }
+
+        func commit() {
+            commitOperation?()
+            commitOperation = nil
+            rollbackOperation = nil
+        }
+
+        func rollback() {
+            rollbackOperation?()
+            commitOperation = nil
+            rollbackOperation = nil
+        }
+    }
+
+    @MainActor
+    private final class Driver: TFYSwiftNavigationDriver, TFYSwiftNavigationCheckpointing {
         var stack: [TFYSwiftAnyRoute] = []
+        var failOnPresentationNumber: Int?
+        var cancelOnPresentationNumber: Int?
+        var stateIdentity = UUID()
+        private var presentationCount = 0
 
         func present(
             destination: TFYSwiftDestinationDescriptor,
@@ -117,13 +250,31 @@ final class TFYSwiftRouterPackageTests: XCTestCase {
             transaction: TFYSwiftRouteTransaction,
             interaction: TFYSwiftRouteInteraction?
         ) async throws {
+            presentationCount += 1
+            if presentationCount == failOnPresentationNumber {
+                throw TFYSwiftRouteError.presentationFailed("injected failure")
+            }
+            if presentationCount == cancelOnPresentationNumber {
+                throw CancellationError()
+            }
             if case .root = transaction.presentation { stack = [route] }
             else { stack.append(route) }
+            stateIdentity = UUID()
         }
 
         func isTop(_ route: TFYSwiftAnyRoute, in scope: TFYSwiftNavigationScopeID) -> Bool { stack.last == route }
         func activate(_ route: TFYSwiftAnyRoute, in scope: TFYSwiftNavigationScopeID) async throws -> Bool { false }
         func routes(in scope: TFYSwiftNavigationScopeID) -> [TFYSwiftAnyRoute] { stack }
+        func makeNavigationCheckpoint(
+            in scope: TFYSwiftNavigationScopeID
+        ) throws -> any TFYSwiftNavigationCheckpoint {
+            let originalStack = stack
+            let originalIdentity = stateIdentity
+            return Checkpoint(commit: {}) { [weak self] in
+                self?.stack = originalStack
+                self?.stateIdentity = originalIdentity
+            }
+        }
         func back(count: Int, in scope: TFYSwiftNavigationScopeID) async throws { stack.removeLast(min(count, stack.count)) }
         func backToRoot(in scope: TFYSwiftNavigationScopeID) async throws { if let first = stack.first { stack = [first] } }
         func dismiss(in scope: TFYSwiftNavigationScopeID) async throws {}
@@ -151,6 +302,175 @@ final class TFYSwiftRouterPackageTests: XCTestCase {
 
         XCTAssertEqual(snapshot.scopes.first?.routes.count, 2)
         XCTAssertEqual(router.navigationRoutes(), [TFYSwiftAnyRoute(Route.root), TFYSwiftAnyRoute(Route.detail)])
+    }
+
+    @MainActor
+    func testRestorationRejectsUnknownScopeBeforeOpeningAnyRoute() async throws {
+        let mainDriver = Driver()
+        let scopedDriver = TFYSwiftScopedNavigationDriver()
+        try scopedDriver.register(mainDriver, for: .main, replacingExisting: false)
+        let routeRegistry = TFYSwiftRouteRegistry()
+        try routeRegistry.register(Route.self) { _, _ in TFYSwiftDestinationDescriptor(identifier: "route") }
+        let router = TFYSwiftRouter(
+            registry: routeRegistry,
+            interceptors: TFYSwiftInterceptorPipeline(),
+            events: TFYSwiftRouteEventCenter(),
+            driver: scopedDriver
+        )
+        let restorationRegistry = TFYSwiftRestorationRegistry()
+        try restorationRegistry.register(Route.self, identifier: "route.v1")
+        let descriptor = try XCTUnwrap(restorationRegistry.descriptor(for: TFYSwiftAnyRoute(Route.root)))
+        let snapshot = TFYSwiftNavigationSnapshot(scopes: [
+            TFYSwiftNavigationScopeSnapshot(scope: .main, routes: [descriptor]),
+            TFYSwiftNavigationScopeSnapshot(scope: "missing", routes: [descriptor])
+        ])
+        let coordinator = TFYSwiftRestorationCoordinator(registry: restorationRegistry, router: router)
+
+        do {
+            try await coordinator.restore(snapshot)
+            XCTFail("Expected unknown scope to fail restoration")
+        } catch {}
+        XCTAssertTrue(mainDriver.stack.isEmpty)
+    }
+
+    @MainActor
+    func testRestorationRejectsUnregisteredRouteBeforeOpeningAnyRoute() async throws {
+        let driver = Driver()
+        let routeRegistry = TFYSwiftRouteRegistry()
+        try routeRegistry.register(Route.self) { _, _ in TFYSwiftDestinationDescriptor(identifier: "route") }
+        let router = TFYSwiftRouter(
+            registry: routeRegistry,
+            interceptors: TFYSwiftInterceptorPipeline(),
+            events: TFYSwiftRouteEventCenter(),
+            driver: driver
+        )
+        let restorationRegistry = TFYSwiftRestorationRegistry()
+        try restorationRegistry.register(Route.self, identifier: "route.v1")
+        try restorationRegistry.register(UnregisteredRoute.self, identifier: "unregistered.v1")
+        let root = try XCTUnwrap(restorationRegistry.descriptor(for: TFYSwiftAnyRoute(Route.root)))
+        let unregistered = try XCTUnwrap(
+            restorationRegistry.descriptor(for: TFYSwiftAnyRoute(UnregisteredRoute.detail))
+        )
+        let snapshot = TFYSwiftNavigationSnapshot(scopes: [
+            TFYSwiftNavigationScopeSnapshot(scope: .main, routes: [root, unregistered])
+        ])
+        let coordinator = TFYSwiftRestorationCoordinator(registry: restorationRegistry, router: router)
+
+        do {
+            try await coordinator.restore(snapshot)
+            XCTFail("Expected unregistered route to fail restoration")
+        } catch {}
+        XCTAssertTrue(driver.stack.isEmpty)
+    }
+
+    @MainActor
+    func testRestorationRollsBackOriginalStackWhenLaterPresentationFails() async throws {
+        let driver = Driver()
+        driver.stack = [TFYSwiftAnyRoute(Route.detail)]
+        let originalIdentity = driver.stateIdentity
+        driver.failOnPresentationNumber = 2
+        let routeRegistry = TFYSwiftRouteRegistry()
+        try routeRegistry.register(Route.self) { _, _ in TFYSwiftDestinationDescriptor(identifier: "route") }
+        let router = TFYSwiftRouter(
+            registry: routeRegistry,
+            interceptors: TFYSwiftInterceptorPipeline(),
+            events: TFYSwiftRouteEventCenter(),
+            driver: driver
+        )
+        let restorationRegistry = TFYSwiftRestorationRegistry()
+        try restorationRegistry.register(Route.self, identifier: "route.v1")
+        let root = try XCTUnwrap(restorationRegistry.descriptor(for: TFYSwiftAnyRoute(Route.root)))
+        let detail = try XCTUnwrap(restorationRegistry.descriptor(for: TFYSwiftAnyRoute(Route.detail)))
+        let snapshot = TFYSwiftNavigationSnapshot(scopes: [
+            TFYSwiftNavigationScopeSnapshot(scope: .main, routes: [root, detail])
+        ])
+        let coordinator = TFYSwiftRestorationCoordinator(registry: restorationRegistry, router: router)
+
+        do {
+            try await coordinator.restore(snapshot)
+            XCTFail("Expected restoration failure")
+        } catch {}
+
+        XCTAssertEqual(driver.stack, [TFYSwiftAnyRoute(Route.detail)])
+        XCTAssertEqual(driver.stateIdentity, originalIdentity)
+    }
+
+    @MainActor
+    func testRestorationRollsBackEmptyStackWhenTaskIsCancelled() async throws {
+        let driver = Driver()
+        driver.cancelOnPresentationNumber = 2
+        let routeRegistry = TFYSwiftRouteRegistry()
+        try routeRegistry.register(Route.self) { _, _ in TFYSwiftDestinationDescriptor(identifier: "route") }
+        let router = TFYSwiftRouter(
+            registry: routeRegistry,
+            interceptors: TFYSwiftInterceptorPipeline(),
+            events: TFYSwiftRouteEventCenter(),
+            driver: driver
+        )
+        let restorationRegistry = TFYSwiftRestorationRegistry()
+        try restorationRegistry.register(Route.self, identifier: "route.v1")
+        let root = try XCTUnwrap(restorationRegistry.descriptor(for: TFYSwiftAnyRoute(Route.root)))
+        let detail = try XCTUnwrap(restorationRegistry.descriptor(for: TFYSwiftAnyRoute(Route.detail)))
+        let snapshot = TFYSwiftNavigationSnapshot(scopes: [
+            TFYSwiftNavigationScopeSnapshot(scope: .main, routes: [root, detail])
+        ])
+        let coordinator = TFYSwiftRestorationCoordinator(registry: restorationRegistry, router: router)
+
+        do {
+            try await coordinator.restore(snapshot)
+            XCTFail("Expected restoration cancellation")
+        } catch {}
+
+        XCTAssertTrue(driver.stack.isEmpty)
+    }
+
+    @MainActor
+    func testRestorationRollsBackEveryScopeWhenLaterScopeFails() async throws {
+        let firstScope: TFYSwiftNavigationScopeID = "restore.first"
+        let secondScope: TFYSwiftNavigationScopeID = "restore.second"
+        let firstDriver = Driver()
+        let secondDriver = Driver()
+        firstDriver.stack = [TFYSwiftAnyRoute(Route.detail)]
+        secondDriver.stack = [TFYSwiftAnyRoute(Route.detail)]
+        let firstIdentity = firstDriver.stateIdentity
+        let secondIdentity = secondDriver.stateIdentity
+        secondDriver.failOnPresentationNumber = 1
+
+        let scopedDriver = TFYSwiftScopedNavigationDriver()
+        try scopedDriver.register(firstDriver, for: firstScope, replacingExisting: false)
+        try scopedDriver.register(secondDriver, for: secondScope, replacingExisting: false)
+        let routeRegistry = TFYSwiftRouteRegistry()
+        try routeRegistry.register(Route.self) { _, _ in
+            TFYSwiftDestinationDescriptor(identifier: "route")
+        }
+        let router = TFYSwiftRouter(
+            registry: routeRegistry,
+            interceptors: TFYSwiftInterceptorPipeline(),
+            events: TFYSwiftRouteEventCenter(),
+            driver: scopedDriver
+        )
+        let restorationRegistry = TFYSwiftRestorationRegistry()
+        try restorationRegistry.register(Route.self, identifier: "route.v1")
+        let root = try XCTUnwrap(
+            restorationRegistry.descriptor(for: TFYSwiftAnyRoute(Route.root))
+        )
+        let snapshot = TFYSwiftNavigationSnapshot(scopes: [
+            .init(scope: firstScope, routes: [root]),
+            .init(scope: secondScope, routes: [root])
+        ])
+
+        do {
+            try await TFYSwiftRestorationCoordinator(
+                registry: restorationRegistry,
+                router: router
+            ).restore(snapshot)
+            XCTFail("Expected second scope to fail restoration")
+        } catch {}
+
+        XCTAssertEqual(firstDriver.stack, [TFYSwiftAnyRoute(Route.detail)])
+        XCTAssertEqual(secondDriver.stack, [TFYSwiftAnyRoute(Route.detail)])
+        XCTAssertEqual(firstDriver.stateIdentity, firstIdentity)
+        XCTAssertEqual(secondDriver.stateIdentity, secondIdentity)
     }
 
     @MainActor

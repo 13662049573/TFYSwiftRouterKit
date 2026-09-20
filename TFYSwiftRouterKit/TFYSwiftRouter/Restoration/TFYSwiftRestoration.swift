@@ -146,7 +146,7 @@ public enum TFYSwiftUnrestorableRoutePolicy: Sendable {
 /// Creates versioned navigation snapshots and replays them through the normal Router pipeline.
 /// The full snapshot is decoded and validated before any navigation state is mutated.
 @MainActor
-/// 负责快照生成、版本迁移、完整解码和逐页恢复；运行期展示失败不自动回滚已恢复页面。
+/// 负责快照生成、版本迁移、完整解码和逐页恢复；运行期失败通过 Driver 检查点原子回滚。
 public final class TFYSwiftRestorationCoordinator {
     public typealias Migration = @MainActor @Sendable (
         TFYSwiftNavigationSnapshot
@@ -217,7 +217,37 @@ public final class TFYSwiftRestorationCoordinator {
             (scopeSnapshot.scope, try scopeSnapshot.routes.map(registry.route(from:)))
         }
 
-        for (scope, routes) in plan where !routes.isEmpty {
+        if let scopedDriver = router.driver as? TFYSwiftScopedNavigationDriver,
+           let scope = plan.first(where: { !scopedDriver.contains($0.0) })?.0 {
+            throw TFYSwiftRouteError.restorationFailed("Scope 未注册：\(scope.rawValue)")
+        }
+        let registeredRouteNames = Set(router.registry.registeredRouteNames)
+        if let route = plan.lazy.flatMap({ $0.1 }).first(where: {
+            !registeredRouteNames.contains($0.typeName)
+        }) {
+            throw TFYSwiftRouteError.restorationFailed("Route 未注册：\(route.typeName)")
+        }
+
+        let affectedPlan = plan.filter { !$0.1.isEmpty }
+        guard !affectedPlan.isEmpty else { return }
+        guard let checkpointing = router.driver as? any TFYSwiftNavigationCheckpointing else {
+            throw TFYSwiftRouteError.restorationFailed("导航驱动不支持原子恢复")
+        }
+        var checkpoints: [any TFYSwiftNavigationCheckpoint] = []
+        do {
+            for (scope, _) in affectedPlan {
+                checkpoints.append(try checkpointing.makeNavigationCheckpoint(in: scope))
+            }
+            try await apply(affectedPlan)
+            checkpoints.forEach { $0.commit() }
+        } catch {
+            checkpoints.reversed().forEach { $0.rollback() }
+            throw error
+        }
+    }
+
+    private func apply(_ plan: [(TFYSwiftNavigationScopeID, [TFYSwiftAnyRoute])]) async throws {
+        for (scope, routes) in plan {
             for (index, route) in routes.enumerated() {
                 do {
                     try await router.open(
