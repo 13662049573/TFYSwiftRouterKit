@@ -20,7 +20,7 @@ jobs:
       - name: Check public API compatibility
         run: |
           router_baseline="$(git describe --tags --abbrev=0 HEAD^)"
-          swift package diagnose-api-breaking-changes "$router_baseline"
+          MACOSX_DEPLOYMENT_TARGET=10.15 swift package diagnose-api-breaking-changes "$router_baseline"
       - name: Build iOS app and tests with device SDK
         run: >-
           xcodebuild build-for-testing
