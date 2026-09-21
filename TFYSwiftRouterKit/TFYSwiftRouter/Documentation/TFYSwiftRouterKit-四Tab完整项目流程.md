@@ -43,33 +43,34 @@ Assembly 会：
 - 创建 TabBar Driver，并将它注入核心 Router。
 - 公开 `navigationDrivers`，供宿主配置 custom/newWindow。
 
-## 3. 页面声明 RouteConfiguration
+## 3. 四个 Feature 各自拥有 VC、Model、Routes、Router
 
 ~~~swift
-struct StartRoute: Hashable, Codable, Sendable, TFYSwiftRoute {}
+@MainActor
+final class StartRouter: TFYSwiftUIKitComponentModule {
+    let rootRegistration = TFYSwiftRootRouteRegistration(
+        scope: "demo.start",
+        route: StartRoute.root
+    )
 
-final class StartViewController: UIViewController {
-    static func routeConfiguration() -> TFYSwiftUIKitRouteConfiguration<StartRoute> {
-        .init(
-            rootScope: "demo.start",
-            rootRoute: StartRoute(),
-            destinationID: "demo.root.start"
-        ) { _, _ in
-            StartViewController()
+    func register(in assembly: TFYSwiftRouterAssembly) throws {
+        try assembly.register(StartRoute.self) { [weak self] route in
+            StartViewController(model: .init()) { action in
+                self?.handle(action)
+            }
         }
     }
 }
 
-let roots = try assembly.registerConfigurations([
-    StartViewController.routeConfiguration(),
-    PlaygroundViewController.routeConfiguration(),
-    StackViewController.routeConfiguration(),
-    TimelineViewController.routeConfiguration(),
-    DetailViewController.routeConfiguration()
+let roots = try assembly.registerComponents([
+    startRouter,
+    playgroundRouter,
+    stackRouter,
+    timelineRouter
 ])
 ~~~
 
-Route、目标标识、页面工厂和可选根 Scope 在同一份配置中关联。页面不持有 Router；AppCoordinator 也不创建具体页面，只安装配置目录。
+每个 Feature 文件夹固定包含 `ViewController`、`Model`、`Routes`、`Router` 四类文件。Router 负责注册和动作，ViewController 只渲染 Model 并回传 Action；AppCoordinator 不认识具体页面。
 
 ## 4. 安装根路由
 
@@ -186,8 +187,7 @@ Demo 的四个根 Route 与详情 Route 分别遵守 Codable，并以稳定 iden
 Demo 源码入口：
 
 - `ClassDemo/App/TFYDemoAppCoordinator.swift`
-- `ClassDemo/Models/TFYDemoRoutes.swift`
-- `ClassDemo/Module/TFYDemoRouteCatalog.swift`
-- `ClassDemo/UI/TFYDemoMenuViewControllers.swift`
-- `ClassDemo/UI/TFYDemoDestinationViewControllers.swift`
-- `ClassDemo/UI/TFYDemoInspectorViewControllers.swift`
+- `ClassDemo/Start/TFYDemoStart{ViewController,Model,Routes,Router}.swift`
+- `ClassDemo/Playground/TFYDemoPlayground{ViewController,Model,Routes,Router}.swift`
+- `ClassDemo/Stack/TFYDemoStack{ViewController,Model,Routes,Router}.swift`
+- `ClassDemo/Timeline/TFYDemoTimeline{ViewController,Model,Routes,Router}.swift`

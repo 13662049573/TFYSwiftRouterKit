@@ -142,38 +142,47 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
         case .automatic:
             trackedController.isNavigationStackEntry = true
             navigationController.pushViewController(viewController, animated: true)
+            await navigationController.awaitTransitionCompletion()
         case .push(let animated):
             trackedController.isNavigationStackEntry = true
             navigationController.pushViewController(viewController, animated: animated)
+            await navigationController.awaitTransitionCompletion()
         case .sheet(let configuration):
             configureSheet(viewController, configuration: configuration)
-            try topViewController(from: navigationController).presentSafely(viewController, animated: true)
+            try await topViewController(from: navigationController).presentSafely(viewController, animated: true)
             observeModalDismissal(of: viewController, interaction: interaction)
         case .fullScreen(let animated):
             viewController.modalPresentationStyle = .fullScreen
-            try topViewController(from: navigationController).presentSafely(viewController, animated: animated)
+            try await topViewController(from: navigationController).presentSafely(viewController, animated: animated)
             observeModalDismissal(of: viewController, interaction: interaction)
         case .replace(let animated):
             trackedController.isNavigationStackEntry = true
             var stack = navigationController.viewControllers
+            let replacedController = stack.last
             if stack.isEmpty {
                 stack = [viewController]
             } else {
-                if checkpointState == nil { cancelInteraction(of: stack[stack.count - 1]) }
                 stack[stack.count - 1] = viewController
             }
             navigationController.setViewControllers(stack, animated: animated)
+            await navigationController.awaitTransitionCompletion()
+            if checkpointState == nil, let replacedController {
+                cancelInteraction(of: replacedController)
+            }
         case .root(let animated):
             trackedController.isNavigationStackEntry = true
-            cancelPresentedHierarchy(from: navigationController)
+            let presentedControllers = presentedHierarchy(from: navigationController)
             // 只关闭此 Scope 展示的子弹层，不能把作为模态容器的导航控制器自身关闭。
             if navigationController.presentedViewController != nil {
-                navigationController.dismiss(animated: false)
+                await navigationController.dismissAwaitingCompletion(animated: false)
             }
-            if checkpointState == nil {
-                navigationController.viewControllers.forEach(cancelInteraction(of:))
-            }
+            let previousControllers = navigationController.viewControllers
             navigationController.setViewControllers([viewController], animated: animated)
+            await navigationController.awaitTransitionCompletion()
+            presentedControllers.forEach(cancelInteraction(of:))
+            if checkpointState == nil {
+                previousControllers.forEach(cancelInteraction(of:))
+            }
         case .newWindow:
             guard let newWindowPresentation else { throw TFYSwiftRouteError.sceneUnavailable }
             try await newWindowPresentation(topViewController(from: navigationController), viewController, transaction)
@@ -200,15 +209,17 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
         guard let target = navigationController.viewControllers.last(where: {
             self.route(for: $0) == route
         }) else { return false }
-        cancelPresentedHierarchy(from: navigationController)
+        let presentedControllers = presentedHierarchy(from: navigationController)
         if navigationController.presentedViewController != nil {
-            navigationController.dismiss(animated: false)
+            await navigationController.dismissAwaitingCompletion(animated: false)
         }
-        let removed = navigationController.viewControllers.drop {
+        let removed = Array(navigationController.viewControllers.drop {
             $0 !== target
-        }.dropFirst()
-        removed.forEach(cancelInteraction(of:))
+        }.dropFirst())
         navigationController.popToViewController(target, animated: true)
+        await navigationController.awaitTransitionCompletion()
+        presentedControllers.forEach(cancelInteraction(of:))
+        removed.forEach(cancelInteraction(of:))
         return true
     }
 
@@ -255,15 +266,19 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
         let stack = navigationController.viewControllers
         guard stack.count > 1 else { throw TFYSwiftRouteError.presentationFailed("已位于根页面") }
         let index = max(0, stack.count - 1 - max(1, count))
-        stack.suffix(from: index + 1).forEach(cancelInteraction(of:))
+        let removed = Array(stack.suffix(from: index + 1))
         navigationController.popToViewController(stack[index], animated: true)
+        await navigationController.awaitTransitionCompletion()
+        removed.forEach(cancelInteraction(of:))
     }
 
     /// 清理当前导航栈的根页之后的页面及其交互。
     public func backToRoot(in scope: TFYSwiftNavigationScopeID) async throws {
         guard let navigationController else { throw TFYSwiftRouteError.scopeUnavailable(scope.rawValue) }
-        navigationController.viewControllers.dropFirst().forEach(cancelInteraction(of:))
+        let removed = Array(navigationController.viewControllers.dropFirst())
         navigationController.popToRootViewController(animated: true)
+        await navigationController.awaitTransitionCompletion()
+        removed.forEach(cancelInteraction(of:))
     }
 
     /// 关闭当前 Scope 的顶层模态页面；没有可关闭页面时可能抛错。
@@ -273,17 +288,17 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
         guard source.presentingViewController != nil || navigationController.presentedViewController != nil else {
             throw TFYSwiftRouteError.presentationFailed("没有可关闭的模态页面")
         }
+        await source.dismissAwaitingCompletion(animated: true)
         cancelInteraction(of: source)
-        source.dismiss(animated: true)
     }
 
     /// 关闭当前 Scope 的全部模态页面及其交互。
     public func dismissAll(in scope: TFYSwiftNavigationScopeID) async throws {
         guard let navigationController else { throw TFYSwiftRouteError.scopeUnavailable(scope.rawValue) }
-        cancelPresentedHierarchy(from: navigationController)
-        if navigationController.presentedViewController != nil {
-            navigationController.dismiss(animated: true)
-        }
+        let presentedControllers = presentedHierarchy(from: navigationController)
+        guard !presentedControllers.isEmpty else { return }
+        await navigationController.dismissAwaitingCompletion(animated: true)
+        presentedControllers.forEach(cancelInteraction(of:))
     }
 
     private func configureSheet(_ viewController: UIViewController, configuration: TFYSwiftSheetConfiguration) {
@@ -551,11 +566,38 @@ private final class TFYSwiftNavigationDelegateObserver: NSObject, UINavigationCo
 
 @MainActor
 private extension UIViewController {
-    func presentSafely(_ viewController: UIViewController, animated: Bool) throws {
+    func presentSafely(_ viewController: UIViewController, animated: Bool) async throws {
         guard presentedViewController == nil else {
             throw TFYSwiftRouteError.presentationFailed("当前页面正在展示其他模态页面")
         }
-        present(viewController, animated: animated)
+        await withCheckedContinuation { continuation in
+            present(viewController, animated: animated) {
+                continuation.resume()
+            }
+        }
+    }
+
+    func dismissAwaitingCompletion(animated: Bool) async {
+        await withCheckedContinuation { continuation in
+            dismiss(animated: animated) {
+                continuation.resume()
+            }
+        }
+    }
+}
+
+@MainActor
+private extension UINavigationController {
+    func awaitTransitionCompletion() async {
+        guard let coordinator = transitionCoordinator else { return }
+        await withCheckedContinuation { continuation in
+            let queued = coordinator.animate(alongsideTransition: nil) { _ in
+                continuation.resume()
+            }
+            if !queued {
+                continuation.resume()
+            }
+        }
     }
 }
 #endif

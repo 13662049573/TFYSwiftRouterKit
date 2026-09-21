@@ -188,22 +188,26 @@ final class TFYSwiftRouterPackageTests: XCTestCase {
     /// 组合根只能装配模块与容器，具体页面必须留在 Destination 工厂中。
     func testDemoCoordinatorDoesNotConstructConcretePages() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        let demo = root.appendingPathComponent("TFYSwiftRouterKit/ClassDemo")
         let coordinator = root.appendingPathComponent(
             "TFYSwiftRouterKit/ClassDemo/App/TFYDemoAppCoordinator.swift"
         )
         let source = try String(contentsOf: coordinator, encoding: .utf8)
 
-        XCTAssertTrue(source.contains("registerConfigurations"))
-        XCTAssertTrue(source.contains("TFYDemoRouteCatalog"))
+        XCTAssertTrue(source.contains("registerComponents"))
+        for module in ["Start", "Playground", "Stack", "Timeline"] {
+            for suffix in ["ViewController", "Model", "Routes", "Router"] {
+                let file = demo.appendingPathComponent("\(module)/TFYDemo\(module)\(suffix).swift")
+                XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "缺少模块文件：\(file.path)")
+            }
+        }
         for forbidden in [
             "makeRootViewController",
             "registerDestinations",
-            "TFYDemoMenuViewController",
+            "TFYDemoStartViewController",
+            "TFYDemoPlaygroundViewController",
             "TFYDemoStackViewController",
-            "TFYDemoTimelineViewController",
-            "TFYDemoDetailViewController",
-            "TFYDemoPickerViewController",
-            "TFYDemoSessionViewController"
+            "TFYDemoTimelineViewController"
         ] {
             XCTAssertFalse(source.contains(forbidden), "Coordinator 泄漏了具体页面：\(forbidden)")
         }

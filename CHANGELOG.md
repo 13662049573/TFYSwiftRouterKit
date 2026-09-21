@@ -2,6 +2,26 @@
 
 本文件记录 TFYSwiftRouterKit 的用户可见变更。版本遵循语义化版本；SwiftPM 使用同名 Git Tag，CocoaPods 使用 `TFYSwiftRouterKit.podspec` 中的版本。
 
+## Unreleased
+
+## 2.2.0 - 2026-09-21
+
+- 新增单参数 `TFYSwiftRouterAssembly.register`，普通页面不再需要接收未使用的 DestinationContext。
+- 新增闭包形式的 Interceptor 登记；简单登录、权限判断无需额外声明协议类型。
+- Assembly 新增 `initialNavigationDriver` 与 `navigationDriver(for:)`；旧 `driver` 保留为弃用兼容别名。
+- 内置 UIKit Driver 的 push、pop、replace、root、present 与 dismiss 会等待系统转场完成后返回；Demo 删除结果页关闭后的轮询等待。
+- README 与完整指南改为先展示默认最短接入，RouteConfiguration、Typed、Scope、Session、恢复等能力按需展开。
+- Demo 按 Start、Playground、Stack、Timeline 四套 Feature 重组，每套独立维护 ViewController、Model、Routes 与 Router。
+- 修复 Replace 替换根页面后点击“完成”无法返回演练根页的问题，并加入 UI 回归测试。
+- 修复双向 Session 的页面事件缺少可见反馈的问题；调用方收到事件后会立即更新状态。
+- 事件列表新增可点击详情页，完整展示路由、Scope、耗时、时间、事务 ID、事件 ID 与说明，并支持选择复制。
+
+### 发布关联
+
+- SwiftPM：使用 Git Tag `2.2.0`，客户端可使用 `.package(url: ..., from: "2.2.0")`。
+- CocoaPods：`TFYSwiftRouterKit.podspec` 与源码 Tag 同为 `2.2.0`。
+- Demo：Xcode 工程 `MARKETING_VERSION` 与组件版本保持为 `2.2.0`。
+
 ## 2.1.0 - 2026-09-20
 
 - 新增 `TFYSwiftTabBarNavigationDriver` 与 `TFYSwiftTabBarScope`；TabBar Assembly 会把 Scope 映射到真实 Tab，并在跨 Scope 展示、激活、回退和关闭前自动选择目标 Tab。

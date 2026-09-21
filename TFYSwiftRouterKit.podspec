@@ -1,6 +1,6 @@
 Pod::Spec.new do |spec|
   spec.name         = 'TFYSwiftRouterKit'
-  spec.version      = '2.1.0'
+  spec.version      = '2.2.0'
   spec.summary      = 'Swift 6 强类型通用 iOS 组件路由，支持多导航域、双向会话、Deep Link、恢复与测试。'
 
   spec.description  = <<-DESC
@@ -12,7 +12,7 @@ Pod::Spec.new do |spec|
   DESC
 
   spec.homepage     = 'https://github.com/13662049573/TFYSwiftRouterKit'
-  spec.documentation_url = 'https://github.com/13662049573/TFYSwiftRouterKit/tree/2.1.0#readme'
+  spec.documentation_url = 'https://github.com/13662049573/TFYSwiftRouterKit/tree/2.2.0#readme'
   spec.license      = { :type => 'MIT', :file => 'LICENSE' }
   spec.author       = { '田风有' => '420144542@qq.com' }
   spec.source       = {

@@ -55,6 +55,7 @@ final class TFYSwiftRouterKitUITests: XCTestCase {
         tapCell("demo.start.session", in: app)
         XCTAssertTrue(app.staticTexts["调用方命令已到达页面"].waitForExistence(timeout: 5))
         app.buttons["demo.session.event"].tap()
+        XCTAssertTrue(app.staticTexts["调用方已收到页面事件"].waitForExistence(timeout: 5))
         app.buttons["demo.session.finish"].tap()
 
         XCTAssertTrue(app.alerts["会话完成"].waitForExistence(timeout: 5))
@@ -72,6 +73,11 @@ final class TFYSwiftRouterKitUITests: XCTestCase {
 
         let events = app.cells.matching(NSPredicate(format: "identifier BEGINSWITH %@", "demo.timeline.event."))
         XCTAssertTrue(events.firstMatch.waitForExistence(timeout: 5))
+        events.firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["事件详情"].waitForExistence(timeout: 5))
+        XCTAssertTrue(
+            (app.textViews["demo.timeline.detail"].value as? String)?.contains("事务 ID：") == true
+        )
     }
 
     @MainActor
@@ -83,6 +89,19 @@ final class TFYSwiftRouterKitUITests: XCTestCase {
 
         XCTAssertTrue(app.alerts["超时已处理"].waitForExistence(timeout: 6))
         XCTAssertTrue(app.alerts["超时已处理"].staticTexts["等待已以 timeout 结束，页面由 Router 关闭。"].exists)
+    }
+
+    @MainActor
+    func testReplaceDoneRestoresPlaygroundRoot() {
+        let app = launchApp()
+        app.tabBars.buttons["演练"].tap()
+
+        tapCell("demo.playground.replace", in: app)
+        XCTAssertTrue(app.navigationBars["Replace 栈顶"].waitForExistence(timeout: 5))
+        app.buttons["demo.destination.done"].tap()
+
+        XCTAssertTrue(app.navigationBars["演练"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.cells["demo.playground.replace"].exists)
     }
 
     @MainActor

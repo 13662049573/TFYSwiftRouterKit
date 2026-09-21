@@ -120,6 +120,44 @@ final class TFYSwiftRouterKitTests: XCTestCase {
     }
 
     @MainActor
+    func testClosureInterceptorUsesIdentifierAndPriority() async {
+        let pipeline = TFYSwiftInterceptorPipeline()
+        pipeline.add(identifier: "closure", priority: 10) { _ in .reject(.cancelled) }
+
+        XCTAssertEqual(pipeline.identifiers, ["closure"])
+        let route = TFYSwiftAnyRoute(TestRoute.detail(id: "1"))
+        let result = await pipeline.run(
+            TFYSwiftRouteTransaction(
+                route: route,
+                context: TFYSwiftRouteContext(),
+                presentation: .automatic,
+                deduplication: .none
+            )
+        )
+        guard case .reject(.cancelled) = result else {
+            return XCTFail("Expected closure interceptor rejection")
+        }
+    }
+
+    @MainActor
+    func testAssemblySimpleRegistrationAndNamedDriverAccess() async throws {
+        let navigationController = UINavigationController()
+        let assembly = TFYSwiftRouterAssembly(navigationController: navigationController)
+        try assembly.register(ConfiguredRoute.self) { route in
+            let controller = UIViewController()
+            controller.title = route.id
+            return controller
+        }
+
+        XCTAssertTrue(assembly.initialNavigationDriver === assembly.navigationDriver(for: .main))
+        try await assembly.router.open(
+            ConfiguredRoute(id: "simple"),
+            presentation: .root(animated: false)
+        )
+        XCTAssertEqual(navigationController.topViewController?.title, "simple")
+    }
+
+    @MainActor
     func testSingleTopDeduplication() async throws {
         let driver = Driver()
         let registry = TFYSwiftRouteRegistry()

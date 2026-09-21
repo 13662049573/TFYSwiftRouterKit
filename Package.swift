@@ -1,6 +1,6 @@
 // swift-tools-version: 6.0
-// 当前清单对应 TFYSwiftRouterKit 2.1.0。
-// Swift Package Manager 不在清单内声明包版本，而是从 Git Tag 解析版本；发布时需创建 2.1.0 Tag。
+// 当前清单对应 TFYSwiftRouterKit 2.2.0。
+// Swift Package Manager 不在清单内声明包版本，而是从 Git Tag 解析版本；发布时需创建 2.2.0 Tag。
 // 完整更新与迁移说明见仓库根目录 CHANGELOG.md。
 import PackageDescription
 

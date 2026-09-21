@@ -62,6 +62,18 @@ final class TFYSwiftRouterUIKitLifecycleTests: XCTestCase {
         }
     }
 
+    private final class DeferredPresentationHostViewController: UIViewController {
+        var presentationCompletion: (() -> Void)?
+
+        override func present(
+            _ viewControllerToPresent: UIViewController,
+            animated flag: Bool,
+            completion: (() -> Void)? = nil
+        ) {
+            presentationCompletion = completion
+        }
+    }
+
     private final class PresentedViewController: UIViewController {
         private lazy var controller = UIPresentationController(
             presentedViewController: self,
@@ -173,6 +185,38 @@ final class TFYSwiftRouterUIKitLifecycleTests: XCTestCase {
         XCTAssertEqual(delegate.shouldDismissCount, 1)
         XCTAssertEqual(delegate.didDismissCount, 1)
         XCTAssertEqual(cancellationCount, 1)
+    }
+
+    func testPresentReturnsOnlyAfterUIKitPresentationCompletes() async throws {
+        let root = DeferredPresentationHostViewController()
+        let navigationController = UINavigationController(rootViewController: root)
+        let registry = TFYSwiftUIKitDestinationRegistry()
+        try registry.register(identifier: "detail", routeType: TestRoute.self) { _, _ in
+            UIViewController()
+        }
+        let driver = TFYSwiftUIKitNavigationDriver(
+            navigationController: navigationController,
+            destinations: registry
+        )
+        var didReturn = false
+
+        let presentation = Task { @MainActor in
+            try await presentDetail(
+                using: driver,
+                interaction: makeInteraction {},
+                presentation: .sheet()
+            )
+            didReturn = true
+        }
+        for _ in 0..<10 where root.presentationCompletion == nil {
+            await Task.yield()
+        }
+
+        XCTAssertNotNil(root.presentationCompletion)
+        XCTAssertFalse(didReturn)
+        root.presentationCompletion?()
+        try await presentation.value
+        XCTAssertTrue(didReturn)
     }
 
     func testModalNavigationControllerKeepsOnlyItsNavigationStackChildren() async throws {

@@ -6,37 +6,75 @@ App 管理容器与依赖，组件管理自己的 Route 和页面工厂。内置
 
 [从 0 到 1 完整中文指南](TFYSwiftRouterKit/TFYSwiftRouter/Documentation/TFYSwiftRouterKit-完整使用指南.md) · [四 Tab 项目流程](TFYSwiftRouterKit/TFYSwiftRouter/Documentation/TFYSwiftRouterKit-四Tab完整项目流程.md) · [变更记录](CHANGELOG.md)
 
-> 当前文档版本：**2.1.0**（2026-09-20）。SwiftPM 发布版本由同名 Git Tag 提供；CocoaPods 版本与 `TFYSwiftRouterKit.podspec` 保持一致。
+> 当前发布版本：**2.2.0**（2026-09-21）。
 
-## 2.1.0 更新说明
+## 3 分钟开始使用
 
-2.1.0 在 2.0.0 通用路由核心之上补齐组件级 TabBar 路由、页面自注册配置、原子恢复和完整的新 Demo 流程。
+普通页面只需要 Route、Assembly 和一个单参数页面工厂：
 
-- 新增 `TFYSwiftTabBarNavigationDriver`，跨 Scope 打开、回退、关闭和激活页面时自动选择目标 Tab。
-- 新增 `TFYSwiftUIKitRouteConfiguration` 与批量事务注册；页面在自身文件中声明 Route、Destination、工厂和根 Scope。
-- UIKit、SwiftUI 与 Scoped Driver 的恢复流程支持页面实例级检查点与失败原子回滚。
-- Typed Destination 工厂获得编译期 Input、Output、Command、Event 约束；Session 缓冲支持有界策略。
-- Demo 从零重建为“开始、演练、导航栈、事件”四 Tab，并覆盖所有公开路由流程。
-- 修复模态生命周期、恢复失败残留、SwiftUI 覆盖关系以及 Demo 上下栏内容穿透问题。
+~~~swift
+import UIKit
+import TFYSwiftRouterKit
+
+enum AppRoute: TFYSwiftRoute {
+    case home
+    case detail(id: String)
+}
+
+let navigationController = UINavigationController()
+let assembly = TFYSwiftRouterAssembly(navigationController: navigationController)
+
+try assembly.register(AppRoute.self) { route in
+    let page = UIViewController()
+    switch route {
+    case .home: page.title = "首页"
+    case .detail(let id): page.title = "详情 \(id)"
+    }
+    return page
+}
+
+try await assembly.router.open(AppRoute.home, presentation: .root(animated: false))
+try await assembly.router.open(AppRoute.detail(id: "1001"), presentation: .push())
+~~~
+
+先用这条默认路径即可。需求出现后再逐层加入能力：
+
+| 需求 | 按需使用 |
+|---|---|
+| 页面自己管理注册 | `TFYSwiftUIKitRouteConfiguration` |
+| 编译期输入/输出 | `registerTyped` / `openTyped` |
+| 多 Tab 或多导航栈 | Scope / TabBar Assembly |
+| 登录、权限等保护 | 闭包 Interceptor；复杂状态再实现协议 |
+| 外链、恢复、双向通信 | DeepLink / Restoration / Session 独立模块 |
+
+## 2.2.0 更新说明
+
+2.2.0 将默认接入路径进一步缩短，并补齐 UIKit 转场完成语义与可直接排查问题的新 Demo。
+
+- 普通页面可直接使用单参数 `register`，简单拦截器可直接登记闭包。
+- Assembly 提供明确的初始 Driver 与按 Scope 查询入口，旧 `driver` 继续兼容。
+- UIKit Driver 等待 push、pop、replace、root、present、dismiss 的真实转场结束后再完成调用。
+- Demo 按 Start、Playground、Stack、Timeline 四套 Feature 重组，并覆盖全部公开路由流程。
+- 修复 Replace 完成无响应和 Session 页面事件反馈缺失；事件页可查看并复制完整诊断字段。
 
 完整条目、兼容影响和迁移示例见 [CHANGELOG](CHANGELOG.md)，从空工程接入见[完整使用指南](TFYSwiftRouterKit/TFYSwiftRouter/Documentation/TFYSwiftRouterKit-完整使用指南.md)。
 
 ### 版本关联与发布顺序
 
-| 入口 | 2.1.0 的版本来源 | 作用 |
+| 入口 | 2.2.0 的版本来源 | 作用 |
 |---|---|---|
-| `Package.swift` | Git Tag `2.1.0` | SwiftPM 清单只描述产品和 Target，不保存独立版本号 |
-| `TFYSwiftRouterKit.podspec` | `spec.version = '2.1.0'` | CocoaPods 源码 Tag 自动使用 `spec.version` |
-| README / 完整指南 / CHANGELOG | 文档中的 2.1.0 声明 | 安装、迁移、更新说明保持一致 |
-| Demo Xcode 工程 | `MARKETING_VERSION = 2.1.0` | 运行示例时显示与组件发布相同的版本 |
+| `Package.swift` | Git Tag `2.2.0` | SwiftPM 清单只描述产品和 Target，不保存独立版本号 |
+| `TFYSwiftRouterKit.podspec` | `spec.version = '2.2.0'` | CocoaPods 源码 Tag 自动使用 `spec.version` |
+| README / 完整指南 / CHANGELOG | 文档中的 2.2.0 声明 | 安装、迁移、更新说明保持一致 |
+| Demo Xcode 工程 | `MARKETING_VERSION = 2.2.0` | 运行示例时显示与组件发布相同的版本 |
 
 建议在发布前依次执行：
 
 1. 完成构建、测试、`swift package dump-package` 和 `pod lib lint`。
 2. 提交本版本的代码、Demo、Podspec 与文档。
-3. 在该提交创建并推送 `2.1.0` Tag，SwiftPM 随即可以解析该版本。
+3. 在该提交创建并推送 `2.2.0` Tag，SwiftPM 随即可以解析该版本。
 4. 以同一 Tag 执行 `pod trunk push TFYSwiftRouterKit.podspec`。
-5. 将 [CHANGELOG 的 2.1.0 内容](CHANGELOG.md)作为 GitHub Release 说明，并再次验证远端 SPM/CocoaPods 接入。
+5. 将 [CHANGELOG 的 2.2.0 内容](CHANGELOG.md)作为 GitHub Release 说明，并再次验证远端 SPM/CocoaPods 接入。
 
 ## 先运行 Demo
 
@@ -48,7 +86,7 @@ App 管理容器与依赖，组件管理自己的 Route 和页面工厂。内置
 
 Demo 已从空目录重新构建，四个 Tab 分别承担引导、能力操作、状态核对和事件诊断；所有按钮都调用公开 API，没有 Demo 专用路由替身。
 
-路由不会消灭 `UIViewController`：UIKit 最终仍需要页面实例。它消除的是调用方对具体页面类、构造参数和展示方式的依赖。Demo 的每个页面在自己的文件中提供 `TFYSwiftUIKitRouteConfiguration`，同时声明 Route、目标标识、页面工厂和可选根 Scope；`AppCoordinator` 只批量安装配置并打开 Route。
+路由不会消灭 `UIViewController`：UIKit 最终仍需要页面实例。它消除的是调用方对具体页面类、构造参数和展示方式的依赖。Demo 按 Start、Playground、Stack、Timeline 分成四套 Feature，每套各自包含 ViewController、Model、Routes、Router；`AppCoordinator` 只安装四个组件并打开根 Route。
 
 ## 功能与演示入口
 
@@ -79,19 +117,19 @@ Demo 已从空目录重新构建，四个 Tab 分别承担引导、能力操作�
 
 组件最低声明为 iOS 16、Swift 6。选择支持 Swift 6 的 Xcode。iOS 页面需要模拟器/真机验证；macOS 的 swift test 只覆盖可在主机运行的模块。
 
-当前 README、Package 清单、Podspec 和完整指南均对应 2.1.0。
+当前 README、Package 清单、Podspec 和完整指南均对应 2.2.0。
 
 ### Swift Package Manager
 
 本地试用：在 Xcode 添加本地 Package，选择本仓库根目录，然后选择需要的产品。
 
-远端接入：在 Xcode 的 Add Package Dependencies 中填写 `https://github.com/13662049573/TFYSwiftRouterKit.git`，Dependency Rule 选择 **Up to Next Major Version**，起始版本填写 `2.1.0`。其他 Package 的清单写法如下：
+远端接入：在 Xcode 的 Add Package Dependencies 中填写 `https://github.com/13662049573/TFYSwiftRouterKit.git`，Dependency Rule 选择 **Up to Next Major Version**，起始版本填写 `2.2.0`。其他 Package 的清单写法如下：
 
 ~~~swift
 dependencies: [
     .package(
         url: "https://github.com/13662049573/TFYSwiftRouterKit.git",
-        from: "2.1.0"
+        from: "2.2.0"
     )
 ]
 ~~~
@@ -125,18 +163,18 @@ import TFYSwiftRouterKit
 
 ### CocoaPods
 
-`2.1.0` 发布到 CocoaPods 后使用：
+`2.2.0` 发布到 CocoaPods 后使用：
 
 ~~~ruby
 platform :ios, '16.0'
 use_frameworks!
 
 target 'MyApp' do
-  pod 'TFYSwiftRouterKit', '~> 2.1'
+  pod 'TFYSwiftRouterKit', '~> 2.2'
 
   target 'MyAppTests' do
     inherit! :search_paths
-    pod 'TFYSwiftRouterKit/Testing', '~> 2.1'
+    pod 'TFYSwiftRouterKit/Testing', '~> 2.2'
   end
 end
 ~~~
@@ -161,7 +199,7 @@ end
 
 仓库 Demo 直接编译组件源码，因而没有这些包 import；复制示例到独立工程时需要补上。
 
-## 最小接入：定义、注册、打开
+## 组件化接入：页面自管理注册
 
 以下代码在 @MainActor 的 App/Scene 组合根中执行。导航控制器和 Assembly 应由 Scene/Flow 属性强持有；window.rootViewController 设置好后再安装根路由。
 
@@ -215,7 +253,7 @@ try await assembly.router.open(
 )
 ~~~
 
-这段代码只使用组件与 UIKit 自带类型；完整的按钮、SceneDelegate、所有权和启动错误处理见使用指南第 3 节。
+小型项目优先使用文首的单参数 `register`。当页面需要随组件自注册、声明根 Scope，或统一批量安装时，再采用这一配置方式。完整的按钮、SceneDelegate、所有权和启动错误处理见使用指南。
 
 固定 Input/Output 的页面可把注册与调用都收紧为编译期类型：
 
@@ -396,7 +434,7 @@ let value: String = try await assembly.router.open(
 
 timeout 单位为秒。普通 open 超时覆盖该次调用；session.value(timeout:) 从调用该方法时开始计时。超时/取消会结束等待与通信，不自动决定 UI 如何关闭，App Flow 需按业务执行 dismiss/back。
 
-UIKit 导航方法的 async 返回不保证动画已经结束。Result 完成后马上展示下一弹层，应等待真实视图层级完成转场；Demo 的强类型结果和 Session 流程包含这项处理。
+内置 UIKit Driver 的 async 导航方法会在系统转场完成后返回，因此 Result 完成后可直接 `await dismiss`，再展示下一弹层。自定义转场与新窗口处理器仍由宿主负责定义何时算完成。
 
 ## 注册可靠性
 
@@ -499,10 +537,11 @@ actions 记录导航动作，invocations 额外记录 Scope、Source、Metadata�
 TFYSwiftRouterKit/
 ├─ AppDelegate/                    Scene 启动、冷/热外部入口
 ├─ ClassDemo/
-│  ├─ App/                         四 Tab 容器组装与路由流程
-│  ├─ Module/                      汇总页面自带的 RouteConfiguration
-│  ├─ Models/                      Route、Contract、Deep Link、拦截器
-│  └─ UI/                          菜单、详情、结果、Session、诊断页面
+│  ├─ App/                         只负责容器与四个 Feature Router 的组装
+│  ├─ Start/                       ViewController + Model + Routes + Router
+│  ├─ Playground/                  ViewController + Model + Routes + Router
+│  ├─ Stack/                       ViewController + Model + Routes + Router
+│  └─ Timeline/                    ViewController + Model + Routes + Router
 └─ TFYSwiftRouter/
    ├─ Core/                        平台无关路由核心
    ├─ UIKit/                       页面工厂、驱动、Assembly

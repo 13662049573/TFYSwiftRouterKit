@@ -16,8 +16,11 @@ public final class TFYSwiftRouterAssembly {
     public let routes: TFYSwiftRouteRegistry
     /// 平台页面工厂注册表。
     public let destinations: TFYSwiftUIKitDestinationRegistry
-    /// 接收导航变更的平台驱动或 Scope 分发驱动。
-    public let driver: TFYSwiftUIKitNavigationDriver
+    /// 初始 Scope 对应的 UIKit 驱动。
+    public let initialNavigationDriver: TFYSwiftUIKitNavigationDriver
+    /// 初始 Scope 对应的 UIKit 驱动；请优先使用语义更明确的 initialNavigationDriver。
+    @available(*, deprecated, renamed: "initialNavigationDriver")
+    public var driver: TFYSwiftUIKitNavigationDriver { initialNavigationDriver }
     /// 按 Scope 路由到独立导航容器的分发驱动。
     public let scopedDriver: TFYSwiftScopedNavigationDriver
     /// 每个 Scope 对应的 UIKit 驱动，供宿主配置 custom/newWindow 等平台呈现。
@@ -39,13 +42,13 @@ public final class TFYSwiftRouterAssembly {
     ) {
         routes = TFYSwiftRouteRegistry()
         destinations = TFYSwiftUIKitDestinationRegistry()
-        driver = TFYSwiftUIKitNavigationDriver(
+        initialNavigationDriver = TFYSwiftUIKitNavigationDriver(
             navigationController: navigationController,
             destinations: destinations
         )
         scopedDriver = TFYSwiftScopedNavigationDriver()
-        try? scopedDriver.register(driver, for: initialScope, replacingExisting: false)
-        navigationDrivers = [initialScope: driver]
+        try? scopedDriver.register(initialNavigationDriver, for: initialScope, replacingExisting: false)
+        navigationDrivers = [initialScope: initialNavigationDriver]
         tabBarDriver = nil
         interceptors = TFYSwiftInterceptorPipeline()
         events = TFYSwiftRouteEventCenter()
@@ -105,7 +108,7 @@ public final class TFYSwiftRouterAssembly {
         let events = TFYSwiftRouteEventCenter()
         self.routes = routes
         self.destinations = destinations
-        driver = initialDriver
+        initialNavigationDriver = initialDriver
         self.scopedDriver = scopedDriver
         navigationDrivers = drivers
         self.tabBarDriver = tabBarDriver
@@ -136,6 +139,24 @@ public final class TFYSwiftRouterAssembly {
         try scopedDriver.register(driver, for: scope, replacingExisting: replacingExisting)
         navigationDrivers[scope] = driver
         return driver
+    }
+
+    /// 返回指定 Scope 的 UIKit 驱动，供宿主配置平台特有呈现。
+    public func navigationDriver(
+        for scope: TFYSwiftNavigationScopeID
+    ) -> TFYSwiftUIKitNavigationDriver? {
+        navigationDrivers[scope]
+    }
+
+    /// 使用默认目标描述符登记 Route 与页面工厂；普通页面优先使用此入口。
+    public func register<R: TFYSwiftRoute>(
+        _ routeType: R.Type,
+        destinationID: String = String(reflecting: R.self),
+        factory: @escaping @MainActor (R) throws -> UIViewController
+    ) throws {
+        try register(routeType, destinationID: destinationID) { route, _ in
+            try factory(route)
+        }
     }
 
     /// 登记独立容器或成对的 Route/页面工厂；页面登记失败时回滚本次地址登记。

@@ -1,6 +1,6 @@
 # TFYSwiftRouterKit 完整使用指南：从 0 到 1
 
-本文对应 TFYSwiftRouterKit 2.1.0 与当前 `ClassDemo`。目标是从空 UIKit 工程完成单栈路由，再升级到组件级 TabBar 路由、强类型结果、双向 Session、Deep Link、恢复和测试。
+本文对应 TFYSwiftRouterKit 2.2.0 与当前 `ClassDemo`。目标是从空 UIKit 工程完成单栈路由，再升级到组件级 TabBar 路由、强类型结果、双向 Session、Deep Link、恢复和测试。
 
 ## 1. 安装
 
@@ -10,7 +10,7 @@
 dependencies: [
     .package(
         url: "https://github.com/13662049573/TFYSwiftRouterKit.git",
-        from: "2.1.0"
+        from: "2.2.0"
     )
 ]
 ~~~
@@ -18,7 +18,7 @@ dependencies: [
 CocoaPods：
 
 ~~~ruby
-pod 'TFYSwiftRouterKit', '~> 2.1'
+pod 'TFYSwiftRouterKit', '~> 2.2'
 ~~~
 
 ## 2. 第一次路由
@@ -32,25 +32,10 @@ enum AppRoute: Hashable, Sendable, TFYSwiftRoute {
 }
 ~~~
 
-让页面声明自己的 Route、目标标识、工厂和根 Scope 关联：
+在 App/Scene 的组合根中创建 Assembly，并直接登记页面工厂：
 
 ~~~swift
-final class HomeViewController: UIViewController {
-    static func routeConfiguration() -> TFYSwiftUIKitRouteConfiguration<AppRoute> {
-        .init(
-            rootScope: .main,
-            rootRoute: AppRoute.home,
-            destinationID: "app.page"
-        ) { route, _ in
-            let page = HomeViewController()
-            switch route {
-            case .home: page.title = "首页"
-            case .detail(let id): page.title = "详情 \(id)"
-            }
-            return page
-        }
-    }
-}
+final class HomeViewController: UIViewController {}
 
 @MainActor
 final class AppFlow {
@@ -61,9 +46,14 @@ final class AppFlow {
         assembly = TFYSwiftRouterAssembly(
             navigationController: navigationController
         )
-        _ = try assembly.registerConfigurations([
-            HomeViewController.routeConfiguration()
-        ])
+        try assembly.register(AppRoute.self) { route in
+            let page = HomeViewController()
+            switch route {
+            case .home: page.title = "首页"
+            case .detail(let id): page.title = "详情 \(id)"
+            }
+            return page
+        }
     }
 
     func start() async throws {
@@ -85,6 +75,37 @@ try await assembly.router.open(
     deduplication: .singleTop
 )
 ~~~
+
+默认注册不需要目标标识、Resolver 或 DestinationContext。页面需要访问输入/输出上下文时使用 `registerTyped`；需要动态解析目标描述符时再使用带 `resolver` 的完整 `register`。
+
+### 2.1 组件按页面自注册
+
+页面数量较多、需要随组件声明根 Scope 时，可把注册配置放回页面文件：
+
+~~~swift
+extension HomeViewController {
+    static func routeConfiguration() -> TFYSwiftUIKitRouteConfiguration<AppRoute> {
+        .init(
+            rootScope: .main,
+            rootRoute: AppRoute.home,
+            destinationID: "app.page"
+        ) { route, _ in
+            let page = HomeViewController()
+            switch route {
+            case .home: page.title = "首页"
+            case .detail(let id): page.title = "详情 \(id)"
+            }
+            return page
+        }
+    }
+}
+
+_ = try assembly.registerConfigurations([
+    HomeViewController.routeConfiguration()
+])
+~~~
+
+这不是普通页面的必选步骤；只有需要组件批量安装和根路由声明时再使用。
 
 ## 3. 组件级 TabBar 路由
 
@@ -336,12 +357,17 @@ assert(router.invocations.last?.scope == "test")
 ~~~text
 ClassDemo/
 ├─ App/TFYDemoAppCoordinator.swift
-├─ Models/TFYDemoRoutes.swift
-└─ UI/
-   ├─ TFYDemoMenuViewControllers.swift
-   ├─ TFYDemoDestinationViewControllers.swift
-   └─ TFYDemoInspectorViewControllers.swift
+├─ Start/
+│  ├─ TFYDemoStartViewController.swift
+│  ├─ TFYDemoStartModel.swift
+│  ├─ TFYDemoStartRoutes.swift
+│  └─ TFYDemoStartRouter.swift
+├─ Playground/                     同样由 ViewController / Model / Routes / Router 组成
+├─ Stack/                          同样由 ViewController / Model / Routes / Router 组成
+└─ Timeline/                       同样由 ViewController / Model / Routes / Router 组成
 ~~~
+
+四个 Feature Router 都实现 `TFYSwiftUIKitComponentModule`。AppCoordinator 只创建容器并调用 `registerComponents`，不构造具体页面，也不集中处理业务 Action。
 
 ## 13. 接入检查
 

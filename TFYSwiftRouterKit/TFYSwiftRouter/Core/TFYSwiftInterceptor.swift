@@ -43,6 +43,24 @@ public protocol TFYSwiftRouteInterceptor: AnyObject {
 }
 
 @MainActor
+private final class TFYSwiftClosureRouteInterceptor: TFYSwiftRouteInterceptor {
+    let identifier: String
+    private let handler: @MainActor (TFYSwiftRouteTransaction) async -> TFYSwiftRouteInterceptionResult
+
+    init(
+        identifier: String,
+        handler: @escaping @MainActor (TFYSwiftRouteTransaction) async -> TFYSwiftRouteInterceptionResult
+    ) {
+        self.identifier = identifier
+        self.handler = handler
+    }
+
+    func intercept(_ transaction: TFYSwiftRouteTransaction) async -> TFYSwiftRouteInterceptionResult {
+        await handler(transaction)
+    }
+}
+
+@MainActor
 /// 按优先级从高到低执行的拦截器集合。
 public final class TFYSwiftInterceptorPipeline {
     private struct Entry {
@@ -60,6 +78,15 @@ public final class TFYSwiftInterceptorPipeline {
         entries.removeAll { $0.interceptor.identifier == interceptor.identifier }
         entries.append(Entry(priority: priority, interceptor: interceptor))
         entries.sort { $0.priority > $1.priority }
+    }
+
+    /// 用闭包登记轻量拦截逻辑；需要复用或维护状态时再实现协议类型。
+    public func add(
+        identifier: String,
+        priority: Int = 0,
+        handler: @escaping @MainActor (TFYSwiftRouteTransaction) async -> TFYSwiftRouteInterceptionResult
+    ) {
+        add(TFYSwiftClosureRouteInterceptor(identifier: identifier, handler: handler), priority: priority)
     }
 
     /// 移除指定观察者或处理器；后续请求不再调用它。
