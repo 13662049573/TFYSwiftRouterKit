@@ -6,7 +6,7 @@ import PackageDescription
 
 let package = Package(
     name: "TFYSwiftRouterKit",
-    platforms: [.iOS(.v16)],
+    platforms: [.iOS(.v16), .macOS(.v10_15)],
     products: [
         // 运行时聚合产品不包含 Testing，测试 Target 应显式依赖 TFYSwiftRouterTesting。
         .library(name: "TFYSwiftRouterKit", targets: ["TFYSwiftRouterKit"]),
