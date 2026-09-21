@@ -20,7 +20,11 @@ jobs:
       - name: Check public API compatibility
         run: |
           router_baseline="$(git describe --tags --abbrev=0 HEAD^)"
-          swift package --triple "$(uname -m)-apple-macosx12.0" diagnose-api-breaking-changes "$router_baseline"
+          if git show "${router_baseline}:Package.swift" | grep -q '\.macOS'; then
+            swift package diagnose-api-breaking-changes "$router_baseline"
+          else
+            echo "::notice::Skipping host API check for legacy baseline ${router_baseline}; it has no macOS platform declaration."
+          fi
       - name: Build iOS app and tests with device SDK
         run: >-
           xcodebuild build-for-testing
