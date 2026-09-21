@@ -9,12 +9,22 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Validate package manifest
+        run: swift package dump-package > /dev/null
+      - name: Validate podspec
+        run: pod spec lint TFYSwiftRouterKit.podspec --quick --allow-warnings
       - name: Test Swift package
         run: swift test
-      - name: Build iOS app and tests
+      - name: Check public API compatibility
+        run: |
+          router_baseline="$(git describe --tags --abbrev=0 HEAD^)"
+          swift package diagnose-api-breaking-changes "$router_baseline"
+      - name: Build iOS app and tests with device SDK
         run: >-
           xcodebuild build-for-testing
           -project TFYSwiftRouterKit.xcodeproj
           -scheme TFYSwiftRouterKit
-          -destination 'generic/platform=iOS Simulator'
+          -destination 'generic/platform=iOS'
           CODE_SIGNING_ALLOWED=NO

@@ -635,6 +635,8 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
         transition(transaction, to: .resolving, event: nil)
         let destination = try await registry.resolve(transaction.route, context: transaction.context)
         try Task.checkCancellation()
+        transaction.destinationID = destination.identifier
+        activeTransactions[transaction.id] = transaction
         emit(transaction, .resolved, message: destination.identifier)
         transition(transaction, to: .presenting, event: .presentStarted)
         try Task.checkCancellation()
@@ -653,14 +655,15 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
         _ transaction: TFYSwiftRouteTransaction,
         to state: TFYSwiftRouteTransactionState,
         event: TFYSwiftRouteEventName?,
-        message: String? = nil
+        message: String? = nil,
+        errorCode: String? = nil
     ) {
         guard activeTransactions[transaction.id] != nil else { return }
         if transactionStates[transaction.id] == nil {
             transactionOrder.append(transaction.id)
         }
         transactionStates[transaction.id] = state
-        if let event { emit(transaction, event, message: message) }
+        if let event { emit(transaction, event, message: message, errorCode: errorCode) }
         if state.isTerminal {
             activeTransactions.removeValue(forKey: transaction.id)
         }
@@ -669,10 +672,21 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
 
     private func fail(_ transaction: TFYSwiftRouteTransaction, with error: Error) {
         if error is CancellationError || (error as? TFYSwiftRouteError) == .cancelled {
-            transition(transaction, to: .cancelled, event: .cancelled)
+            transition(
+                transaction,
+                to: .cancelled,
+                event: .cancelled,
+                errorCode: TFYSwiftRouteError.cancelled.code
+            )
         } else {
             let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-            transition(transaction, to: .failed(message: message), event: .failed, message: message)
+            transition(
+                transaction,
+                to: .failed(message: message),
+                event: .failed,
+                message: message,
+                errorCode: (error as? TFYSwiftRouteError)?.code
+            )
         }
     }
 
@@ -684,13 +698,20 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
     private func emit(
         _ transaction: TFYSwiftRouteTransaction,
         _ name: TFYSwiftRouteEventName,
-        message: String? = nil
+        message: String? = nil,
+        errorCode: String? = nil
     ) {
         events.emit(TFYSwiftRouteEvent(
             transactionID: transaction.id,
             name: name,
             routeName: transaction.route.typeName,
             scope: transaction.context.scope,
+            source: transaction.context.source,
+            traceID: transaction.context.metadata.traceID,
+            presentation: transaction.presentation,
+            deduplication: transaction.deduplication,
+            destinationID: transaction.destinationID,
+            errorCode: errorCode,
             elapsedMilliseconds: Date().timeIntervalSince(transaction.context.timestamp) * 1_000,
             message: message
         ))

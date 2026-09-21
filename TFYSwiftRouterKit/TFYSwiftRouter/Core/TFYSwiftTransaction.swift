@@ -29,6 +29,8 @@ public struct TFYSwiftRouteTransaction: Sendable, Hashable {
     public let presentation: TFYSwiftRoutePresentation
     /// 本次请求采用的地址去重策略。
     public let deduplication: TFYSwiftRouteDeduplicationPolicy
+    /// Resolver 成功后得到的稳定页面工厂标识；解析前为 nil。
+    public var destinationID: String?
 
     /// 创建事务；重定向复用此身份，保留上下文和呈现策略。
     public init(
@@ -43,6 +45,7 @@ public struct TFYSwiftRouteTransaction: Sendable, Hashable {
         self.context = context
         self.presentation = presentation
         self.deduplication = deduplication
+        self.destinationID = nil
     }
 }
 

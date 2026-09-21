@@ -1,6 +1,6 @@
 # TFYSwiftRouterKit 完整使用指南：从 0 到 1
 
-本文对应 TFYSwiftRouterKit 2.2.0 与当前 `ClassDemo`。目标是从空 UIKit 工程完成单栈路由，再升级到组件级 TabBar 路由、强类型结果、双向 Session、Deep Link、恢复和测试。
+本文对应 TFYSwiftRouterKit 2.3.0 与当前 `ClassDemo`。目标是从空 UIKit 工程完成单栈路由，再升级到组件级 TabBar 路由、强类型结果、双向 Session、Deep Link、恢复和测试。
 
 ## 1. 安装
 
@@ -10,7 +10,7 @@
 dependencies: [
     .package(
         url: "https://github.com/13662049573/TFYSwiftRouterKit.git",
-        from: "2.2.0"
+        from: "2.3.0"
     )
 ]
 ~~~
@@ -18,7 +18,7 @@ dependencies: [
 CocoaPods：
 
 ~~~ruby
-pod 'TFYSwiftRouterKit', '~> 2.2'
+pod 'TFYSwiftRouterKit', '~> 2.3'
 ~~~
 
 ## 2. 第一次路由
@@ -330,7 +330,7 @@ let history = TFYSwiftRouteHistory(capacity: 200)
 assembly.events.add(history)
 ~~~
 
-Demo 的“事件”Tab 展示 created、resolved、presented、completed、failed 等真实事件；“导航栈”Tab 展示每个 Scope 的真实地址栈。
+Demo 的“事件”Tab 展示 created、resolved、presented、completed、failed 等真实事件，并可查看 source、traceID、presentation、deduplication、destinationID 和 errorCode；metadata 的业务 values 不会自动进入诊断事件。“导航栈”Tab 展示每个 Scope 的真实地址栈。
 
 ~~~swift
 let router = TFYSwiftTestRouter()

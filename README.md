@@ -6,7 +6,7 @@ App 管理容器与依赖，组件管理自己的 Route 和页面工厂。内置
 
 [从 0 到 1 完整中文指南](TFYSwiftRouterKit/TFYSwiftRouter/Documentation/TFYSwiftRouterKit-完整使用指南.md) · [四 Tab 项目流程](TFYSwiftRouterKit/TFYSwiftRouter/Documentation/TFYSwiftRouterKit-四Tab完整项目流程.md) · [变更记录](CHANGELOG.md)
 
-> 当前发布版本：**2.2.0**（2026-09-21）。
+> 当前开发版本：**2.3.0**（2026-09-21）。
 
 ## 3 分钟开始使用
 
@@ -47,39 +47,38 @@ try await assembly.router.open(AppRoute.detail(id: "1001"), presentation: .push(
 | 登录、权限等保护 | 闭包 Interceptor；复杂状态再实现协议 |
 | 外链、恢复、双向通信 | DeepLink / Restoration / Session 独立模块 |
 
-## 2.2.0 更新说明
+## 2.3.0 更新说明
 
-2.2.0 将默认接入路径进一步缩短，并补齐 UIKit 转场完成语义与可直接排查问题的新 Demo。
+2.3.0 补齐结构化路由诊断与无模拟器验证流水线。
 
-- 普通页面可直接使用单参数 `register`，简单拦截器可直接登记闭包。
-- Assembly 提供明确的初始 Driver 与按 Scope 查询入口，旧 `driver` 继续兼容。
-- UIKit Driver 等待 push、pop、replace、root、present、dismiss 的真实转场结束后再完成调用。
-- Demo 按 Start、Playground、Stack、Timeline 四套 Feature 重组，并覆盖全部公开路由流程。
-- 修复 Replace 完成无响应和 Session 页面事件反馈缺失；事件页可查看并复制完整诊断字段。
+- 事件新增来源、链路 ID、呈现方式、去重策略、目标 ID 与稳定错误码。
+- 目标 ID 在解析完成后贯穿 presented、completed 和 failed 等后续事件。
+- Demo 事件详情展示完整结构化字段，并补充事件模型回归测试。
+- CI 使用 generic iOS 真机 SDK 构建，不再依赖 Simulator，并对上一版本执行公开 API 兼容性检查。
 
 完整条目、兼容影响和迁移示例见 [CHANGELOG](CHANGELOG.md)，从空工程接入见[完整使用指南](TFYSwiftRouterKit/TFYSwiftRouter/Documentation/TFYSwiftRouterKit-完整使用指南.md)。
 
 ### 版本关联与发布顺序
 
-| 入口 | 2.2.0 的版本来源 | 作用 |
+| 入口 | 2.3.0 的版本来源 | 作用 |
 |---|---|---|
-| `Package.swift` | Git Tag `2.2.0` | SwiftPM 清单只描述产品和 Target，不保存独立版本号 |
-| `TFYSwiftRouterKit.podspec` | `spec.version = '2.2.0'` | CocoaPods 源码 Tag 自动使用 `spec.version` |
-| README / 完整指南 / CHANGELOG | 文档中的 2.2.0 声明 | 安装、迁移、更新说明保持一致 |
-| Demo Xcode 工程 | `MARKETING_VERSION = 2.2.0` | 运行示例时显示与组件发布相同的版本 |
+| `Package.swift` | Git Tag `2.3.0` | SwiftPM 清单只描述产品和 Target，不保存独立版本号 |
+| `TFYSwiftRouterKit.podspec` | `spec.version = '2.3.0'` | CocoaPods 源码 Tag 自动使用 `spec.version` |
+| README / 完整指南 / CHANGELOG | 文档中的 2.3.0 声明 | 安装、迁移、更新说明保持一致 |
+| Demo Xcode 工程 | `MARKETING_VERSION = 2.3.0` | 运行示例时显示与组件发布相同的版本 |
 
 建议在发布前依次执行：
 
 1. 完成构建、测试、`swift package dump-package` 和 `pod lib lint`。
 2. 提交本版本的代码、Demo、Podspec 与文档。
-3. 在该提交创建并推送 `2.2.0` Tag，SwiftPM 随即可以解析该版本。
+3. 在该提交创建并推送 `2.3.0` Tag，SwiftPM 随即可以解析该版本。
 4. 以同一 Tag 执行 `pod trunk push TFYSwiftRouterKit.podspec`。
-5. 将 [CHANGELOG 的 2.2.0 内容](CHANGELOG.md)作为 GitHub Release 说明，并再次验证远端 SPM/CocoaPods 接入。
+5. 将 [CHANGELOG 的 2.3.0 内容](CHANGELOG.md)作为 GitHub Release 说明，并再次验证远端 SPM/CocoaPods 接入。
 
 ## 先运行 Demo
 
 1. 打开 TFYSwiftRouterKit.xcodeproj。
-2. 选择 TFYSwiftRouterKit Scheme 和一台 iOS 16+ 真机或模拟器。
+2. 选择 TFYSwiftRouterKit Scheme 和一台 iOS 16+ 真机。
 3. 运行后从“开始”Tab 依次执行“打开详情 → 自动跨 Tab → 等待页面结果 → 查看事件”。
 4. 在“演练”Tab 操作全部呈现方式、去重、拦截、Deep Link、强类型结果和双向 Session。
 5. 使用“导航栈”和“事件”Tab 核对每个 Scope 的真实页面栈与事务事件。
@@ -115,21 +114,21 @@ Demo 已从空目录重新构建，四个 Tab 分别承担引导、能力操作�
 
 ## 环境和安装
 
-组件最低声明为 iOS 16、Swift 6。选择支持 Swift 6 的 Xcode。iOS 页面需要模拟器/真机验证；macOS 的 swift test 只覆盖可在主机运行的模块。
+组件最低声明为 iOS 16、Swift 6。选择支持 Swift 6 的 Xcode。iOS 页面使用真机验证；macOS 的 swift test 只覆盖可在主机运行的模块。
 
-当前 README、Package 清单、Podspec 和完整指南均对应 2.2.0。
+当前 README、Package 清单、Podspec 和完整指南均对应 2.3.0。
 
 ### Swift Package Manager
 
 本地试用：在 Xcode 添加本地 Package，选择本仓库根目录，然后选择需要的产品。
 
-远端接入：在 Xcode 的 Add Package Dependencies 中填写 `https://github.com/13662049573/TFYSwiftRouterKit.git`，Dependency Rule 选择 **Up to Next Major Version**，起始版本填写 `2.2.0`。其他 Package 的清单写法如下：
+远端接入：在 Xcode 的 Add Package Dependencies 中填写 `https://github.com/13662049573/TFYSwiftRouterKit.git`，Dependency Rule 选择 **Up to Next Major Version**，起始版本填写 `2.3.0`。其他 Package 的清单写法如下：
 
 ~~~swift
 dependencies: [
     .package(
         url: "https://github.com/13662049573/TFYSwiftRouterKit.git",
-        from: "2.2.0"
+        from: "2.3.0"
     )
 ]
 ~~~
@@ -163,18 +162,18 @@ import TFYSwiftRouterKit
 
 ### CocoaPods
 
-`2.2.0` 发布到 CocoaPods 后使用：
+`2.3.0` 发布到 CocoaPods 后使用：
 
 ~~~ruby
 platform :ios, '16.0'
 use_frameworks!
 
 target 'MyApp' do
-  pod 'TFYSwiftRouterKit', '~> 2.2'
+  pod 'TFYSwiftRouterKit', '~> 2.3'
 
   target 'MyAppTests' do
     inherit! :search_paths
-    pod 'TFYSwiftRouterKit/Testing', '~> 2.2'
+    pod 'TFYSwiftRouterKit/Testing', '~> 2.3'
   end
 end
 ~~~
@@ -504,6 +503,7 @@ try await restoration.restore(decoded)
 ## 诊断和测试
 
 EventCenter 弱持有观察者，App 应持有 History。transactionStates 与 History 都是有限诊断记录，不是永久存储。手工清理不会取消正在运行的导航。
+每条事件都携带 source、traceID、presentation、deduplication、destinationID 和 errorCode；metadata 的业务 values 不会自动写入事件，避免诊断日志泄漏敏感数据。
 
 ~~~swift
 let history = TFYSwiftRouteHistory(capacity: 200)
@@ -563,7 +563,7 @@ swift test
 xcodebuild build-for-testing \
   -project TFYSwiftRouterKit.xcodeproj \
   -scheme TFYSwiftRouterKit \
-  -destination 'generic/platform=iOS Simulator' \
+  -destination 'generic/platform=iOS' \
   CODE_SIGNING_ALLOWED=NO
 ~~~
 

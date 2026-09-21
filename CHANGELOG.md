@@ -4,6 +4,20 @@
 
 ## Unreleased
 
+## 2.3.0 - 2026-09-21
+
+- 路由事件新增来源、链路 ID、呈现方式、去重策略、目标 ID 与稳定错误码，诊断信息不再依赖复用的 message 字段。
+- Resolver 成功后，目标 ID 会贯穿 resolved、presented、completed 和 failed 等后续事件。
+- Demo 事件详情展示全部结构化诊断字段，并补充字段完整性 UI 回归断言。
+- 新增事件上下文、失败错误码、History 容量与清空通知的 SwiftPM 回归测试。
+- CI 改为使用真机 SDK 的 generic iOS 构建，不再使用 Simulator，并增加 Package 清单、Podspec 与上一版本公开 API 兼容性校验。
+
+### 发布关联
+
+- SwiftPM：发布时使用 Git Tag `2.3.0`。
+- CocoaPods：`TFYSwiftRouterKit.podspec` 与源码 Tag 同为 `2.3.0`。
+- Demo：Xcode 工程 `MARKETING_VERSION` 与组件版本保持为 `2.3.0`。
+
 ## 2.2.0 - 2026-09-21
 
 - 新增单参数 `TFYSwiftRouterAssembly.register`，普通页面不再需要接收未使用的 DestinationContext。

@@ -34,11 +34,17 @@ final class TFYDemoTimelineRouter: TFYSwiftUIKitComponentModule {
         return .init(rows: history.events.reversed().enumerated().map { index, event in
             .init(
                 name: event.name.rawValue,
-                detail: "\(event.scope.rawValue) · \(event.routeName) · \(String(format: "%.1f", event.elapsedMilliseconds)) ms",
+                detail: "\(event.scope.rawValue) · \(event.source.rawValue) · \(event.routeName) · \(String(format: "%.1f", event.elapsedMilliseconds)) ms",
                 fullDetail: [
                     "事件：\(event.name.rawValue)",
                     "路由：\(event.routeName)",
                     "Scope：\(event.scope.rawValue)",
+                    "来源：\(event.source.rawValue)",
+                    "呈现：\(presentationName(event.presentation))",
+                    "去重：\(event.deduplication.rawValue)",
+                    "目标 ID：\(event.destinationID ?? "无")",
+                    "链路 ID：\(event.traceID ?? "无")",
+                    "错误码：\(event.errorCode ?? "无")",
                     "耗时：\(String(format: "%.1f", event.elapsedMilliseconds)) ms",
                     "时间：\(dateFormatter.string(from: event.timestamp))",
                     "事务 ID：\(event.transactionID.uuidString)",
@@ -50,6 +56,19 @@ final class TFYDemoTimelineRouter: TFYSwiftUIKitComponentModule {
                 accessibilityID: "demo.timeline.event.\(index)"
             )
         })
+    }
+
+    private func presentationName(_ presentation: TFYSwiftRoutePresentation) -> String {
+        switch presentation {
+        case .automatic: "automatic"
+        case .push: "push"
+        case .sheet: "sheet"
+        case .fullScreen: "fullScreen"
+        case .replace: "replace"
+        case .root: "root"
+        case .newWindow: "newWindow"
+        case .custom(let identifier): "custom(\(identifier))"
+        }
     }
 
     private func symbol(for name: TFYSwiftRouteEventName) -> String {

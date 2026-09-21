@@ -185,6 +185,130 @@ final class TFYSwiftRouterPackageTests: XCTestCase {
         XCTAssertEqual(TFYSwiftRouteError.timeout.code, "timeout")
     }
 
+    @MainActor
+    func testRouteEventsPreserveStructuredDiagnosticContext() async throws {
+        let driver = Driver()
+        let registry = TFYSwiftRouteRegistry()
+        try registry.register(Route.self) { _, _ in
+            TFYSwiftDestinationDescriptor(identifier: "route.destination")
+        }
+        let eventCenter = TFYSwiftRouteEventCenter()
+        let history = TFYSwiftRouteHistory()
+        eventCenter.add(history)
+        let router = TFYSwiftRouter(
+            registry: registry,
+            interceptors: TFYSwiftInterceptorPipeline(),
+            events: eventCenter,
+            driver: driver
+        )
+        let scope: TFYSwiftNavigationScopeID = "diagnostics"
+
+        try await router.open(
+            Route.detail,
+            presentation: .custom("fade"),
+            source: .deepLink,
+            scope: scope,
+            metadata: .init(traceID: "trace-1001"),
+            deduplication: .singleTop
+        )
+
+        let resolved = try XCTUnwrap(history.events.first { $0.name == .resolved })
+        let completed = try XCTUnwrap(history.events.first { $0.name == .completed })
+        XCTAssertEqual(resolved.source, .deepLink)
+        XCTAssertEqual(resolved.traceID, "trace-1001")
+        XCTAssertEqual(resolved.presentation, .custom("fade"))
+        XCTAssertEqual(resolved.deduplication, .singleTop)
+        XCTAssertEqual(resolved.destinationID, "route.destination")
+        XCTAssertEqual(completed.destinationID, "route.destination")
+        XCTAssertNil(completed.errorCode)
+        XCTAssertEqual(history.events.map(\.name), [
+            .created,
+            .interceptStarted,
+            .resolved,
+            .presentStarted,
+            .presented,
+            .completed
+        ])
+    }
+
+    @MainActor
+    func testFailedRouteEventPreservesStableErrorCode() async throws {
+        let driver = Driver()
+        driver.failOnPresentationNumber = 1
+        let registry = TFYSwiftRouteRegistry()
+        try registry.register(Route.self) { _, _ in
+            TFYSwiftDestinationDescriptor(identifier: "route.destination")
+        }
+        let eventCenter = TFYSwiftRouteEventCenter()
+        let history = TFYSwiftRouteHistory()
+        eventCenter.add(history)
+        let router = TFYSwiftRouter(
+            registry: registry,
+            interceptors: TFYSwiftInterceptorPipeline(),
+            events: eventCenter,
+            driver: driver
+        )
+
+        do {
+            try await router.open(Route.detail)
+            XCTFail("Expected presentation failure")
+        } catch {}
+
+        let failed = try XCTUnwrap(history.events.last { $0.name == .failed })
+        XCTAssertEqual(failed.destinationID, "route.destination")
+        XCTAssertEqual(failed.errorCode, TFYSwiftRouteError.presentationFailed("ignored").code)
+    }
+
+    @MainActor
+    func testCancelledRouteEventPreservesStableErrorCode() async throws {
+        let driver = Driver()
+        driver.cancelOnPresentationNumber = 1
+        let registry = TFYSwiftRouteRegistry()
+        try registry.register(Route.self) { _, _ in
+            TFYSwiftDestinationDescriptor(identifier: "route.destination")
+        }
+        let eventCenter = TFYSwiftRouteEventCenter()
+        let history = TFYSwiftRouteHistory()
+        eventCenter.add(history)
+        let router = TFYSwiftRouter(
+            registry: registry,
+            interceptors: TFYSwiftInterceptorPipeline(),
+            events: eventCenter,
+            driver: driver
+        )
+
+        do {
+            try await router.open(Route.detail)
+            XCTFail("Expected cancellation")
+        } catch {}
+
+        let cancelled = try XCTUnwrap(history.events.last { $0.name == .cancelled })
+        XCTAssertEqual(cancelled.destinationID, "route.destination")
+        XCTAssertEqual(cancelled.errorCode, TFYSwiftRouteError.cancelled.code)
+    }
+
+    @MainActor
+    func testRouteHistoryCapacityAndClearNotifications() {
+        let history = TFYSwiftRouteHistory(capacity: 2)
+        var changeCount = 0
+        history.onChange = { changeCount += 1 }
+
+        for index in 0..<3 {
+            history.routerDidEmit(TFYSwiftRouteEvent(
+                transactionID: UUID(),
+                name: .created,
+                routeName: "route.\(index)",
+                scope: .main,
+                elapsedMilliseconds: 0
+            ))
+        }
+
+        XCTAssertEqual(history.events.map(\.routeName), ["route.1", "route.2"])
+        history.removeAll()
+        XCTAssertTrue(history.events.isEmpty)
+        XCTAssertEqual(changeCount, 4)
+    }
+
     /// 组合根只能装配模块与容器，具体页面必须留在 Destination 工厂中。
     func testDemoCoordinatorDoesNotConstructConcretePages() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()

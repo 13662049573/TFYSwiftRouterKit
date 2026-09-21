@@ -20,7 +20,7 @@ public enum TFYSwiftRouteEventName: String, Codable, Sendable {
     case failed
 }
 
-/// 单条事件记录，包含事务 ID、Scope、耗时和可选说明。
+/// 单条事件记录，包含事务 ID、请求上下文、呈现策略、目标标识、耗时和可选说明。
 public struct TFYSwiftRouteEvent: Identifiable, Sendable {
     /// 当前值的唯一身份；用于关联记录或区分重复地址的页面实例。
     public let id: UUID
@@ -32,6 +32,18 @@ public struct TFYSwiftRouteEvent: Identifiable, Sendable {
     public let routeName: String
     /// 本次导航操作所属的容器作用域。
     public let scope: TFYSwiftNavigationScopeID
+    /// 请求来源，用于区分用户操作、Deep Link、恢复等入口。
+    public let source: TFYSwiftRouteSource
+    /// 调用方提供的链路标识；不记录 metadata 中可能包含的业务值。
+    public let traceID: String?
+    /// 本次事务采用的页面呈现策略。
+    public let presentation: TFYSwiftRoutePresentation
+    /// 本次事务采用的地址去重策略。
+    public let deduplication: TFYSwiftRouteDeduplicationPolicy
+    /// Resolver 成功后得到的稳定页面工厂标识。
+    public let destinationID: String?
+    /// 失败或取消时的稳定机器可读错误码。
+    public let errorCode: String?
     /// 记录创建时间，用于计算相对耗时。
     public let timestamp: Date
     /// 从请求上下文创建到当前事件的耗时，单位为毫秒。
@@ -50,11 +62,52 @@ public struct TFYSwiftRouteEvent: Identifiable, Sendable {
         elapsedMilliseconds: Double,
         message: String? = nil
     ) {
+        self.init(
+            id: id,
+            transactionID: transactionID,
+            name: name,
+            routeName: routeName,
+            scope: scope,
+            source: .userInteraction,
+            traceID: nil,
+            presentation: .automatic,
+            deduplication: .none,
+            destinationID: nil,
+            errorCode: nil,
+            timestamp: timestamp,
+            elapsedMilliseconds: elapsedMilliseconds,
+            message: message
+        )
+    }
+
+    /// 创建包含完整结构化上下文的事件记录；metadata 业务值不会进入诊断事件。
+    public init(
+        id: UUID = UUID(),
+        transactionID: UUID,
+        name: TFYSwiftRouteEventName,
+        routeName: String,
+        scope: TFYSwiftNavigationScopeID,
+        source: TFYSwiftRouteSource,
+        traceID: String?,
+        presentation: TFYSwiftRoutePresentation,
+        deduplication: TFYSwiftRouteDeduplicationPolicy,
+        destinationID: String?,
+        errorCode: String?,
+        timestamp: Date = Date(),
+        elapsedMilliseconds: Double,
+        message: String? = nil
+    ) {
         self.id = id
         self.transactionID = transactionID
         self.name = name
         self.routeName = routeName
         self.scope = scope
+        self.source = source
+        self.traceID = traceID
+        self.presentation = presentation
+        self.deduplication = deduplication
+        self.destinationID = destinationID
+        self.errorCode = errorCode
         self.timestamp = timestamp
         self.elapsedMilliseconds = elapsedMilliseconds
         self.message = message

@@ -75,9 +75,10 @@ final class TFYSwiftRouterKitUITests: XCTestCase {
         XCTAssertTrue(events.firstMatch.waitForExistence(timeout: 5))
         events.firstMatch.tap()
         XCTAssertTrue(app.navigationBars["事件详情"].waitForExistence(timeout: 5))
-        XCTAssertTrue(
-            (app.textViews["demo.timeline.detail"].value as? String)?.contains("事务 ID：") == true
-        )
+        let detail = app.textViews["demo.timeline.detail"].value as? String
+        for field in ["事务 ID：", "来源：", "呈现：", "去重：", "目标 ID：", "链路 ID：", "错误码："] {
+            XCTAssertTrue(detail?.contains(field) == true, "事件详情缺少字段：\(field)")
+        }
     }
 
     @MainActor
