@@ -16,7 +16,7 @@ jobs:
       - name: Validate podspec
         run: pod spec lint TFYSwiftRouterKit.podspec --quick --allow-warnings
       - name: Test Swift package
-        run: swift test
+        run: swift test --jobs 1
       - name: Check public API compatibility
         run: |
           router_baseline="$(git describe --tags --abbrev=0 HEAD^)"
