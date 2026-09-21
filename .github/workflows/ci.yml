@@ -6,9 +6,9 @@ on:
 
 jobs:
   test:
-    runs-on: macos-latest
+    runs-on: xcode-27
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Validate package manifest
