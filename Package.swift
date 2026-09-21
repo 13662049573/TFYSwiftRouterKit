@@ -59,7 +59,7 @@ let package = Package(
             path: "TFYSwiftRouterKit/TFYSwiftRouter/Umbrella"
         ),
         .testTarget(
-            name: "TFYSwiftRouterKitPackageTests",
+            name: "TFYSwiftRouterTests",
             dependencies: [
                 "TFYSwiftRouterCore",
                 "TFYSwiftRouterDeepLink",

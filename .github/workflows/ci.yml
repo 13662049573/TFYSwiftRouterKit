@@ -6,7 +6,7 @@ on:
 
 jobs:
   test:
-    runs-on: macos-15
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -16,7 +16,7 @@ jobs:
       - name: Validate podspec
         run: pod spec lint TFYSwiftRouterKit.podspec --quick --allow-warnings
       - name: Test Swift package
-        run: swift test --jobs 1
+        run: swift test
       - name: Check public API compatibility
         run: |
           router_baseline="$(git describe --tags --abbrev=0 HEAD^)"
