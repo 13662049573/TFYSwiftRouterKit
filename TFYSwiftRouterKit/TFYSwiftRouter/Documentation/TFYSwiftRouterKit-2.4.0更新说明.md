@@ -1,6 +1,6 @@
 # TFYSwiftRouterKit 2.4.0 更新说明
 
-准备日期：2026-10-01。状态：本地待提交、待发布。
+发布日期：2026-10-01。状态：[GitHub 2.4.0 已发布](https://github.com/13662049573/TFYSwiftRouterKit/releases/tag/2.4.0)，Tag 指向 `e40bf41`；CocoaPods 2.4.0 尚未收录到 Trunk。
 
 2.4.0 加强并发导航、恢复隔离及取消一致性，并将旧 Demo 整体替换为五入口视频项目。继续采用 iOS 16+、Swift 6、SwiftPM / CocoaPods 按模块集成方式。
 
@@ -44,12 +44,12 @@
 | 入口 | 版本 |
 |---|---|
 | CocoaPods Podspec | 2.4.0，源码 Tag 与文档链接自动使用此版本 |
-| SwiftPM | 待创建并推送 Git Tag 2.4.0；Package.swift 只保存版本说明 |
+| SwiftPM | 已发布 Git Tag 2.4.0，指向 e40bf41；Package.swift 只保存版本说明 |
 | App 与测试 Target | MARKETING_VERSION = 2.4.0 |
 | Demo 设置页 | 读取 App Bundle 的版本 |
 | README / 完整指南 / CHANGELOG | 同步至 2.4.0 |
 
-Tag 和 CocoaPods Specs 发布前，请使用本地路径集成；README 中 2.4.0 的远端依赖示例在发布后才可使用。
+SwiftPM 可直接使用已发布 Tag 集成。CocoaPods 2.4.0 Specs 尚未收录，使用本地路径验证；README 中 CocoaPods 的 2.4.0 远端示例需等 Specs 发布后使用。
 
 ## 验证记录
 
@@ -63,7 +63,7 @@ Tag 和 CocoaPods Specs 发布前，请使用本地路径集成；README 中 2.4
 
 本轮仅调整版本和说明，未重复完整界面流程测试。
 
-这些结果不代表 GitHub CI、最低系统版本真机或远端 SwiftPM / CocoaPods 发布验证已完成，也不包含真实设备帧率测量。
+这些结果不代表 GitHub CI、最低系统版本真机、独立 UIKit / SwiftUI 消费工程或 CocoaPods Specs 发布验证已完成，也不包含真实设备帧率测量。
 
 ## 建议 GitHub 提交说明
 
@@ -76,6 +76,12 @@ Tag 和 CocoaPods Specs 发布前，请使用本地路径集成；README 中 2.4
 - 删除旧 Demo，重建五入口视频项目及二级页底栏显示策略，补齐模拟业务流程。
 - 同步 Podspec、SwiftPM 版本说明、Xcode 版本和中文文档，补充回归测试。
 
-## 后续发布状态
+## 发布核验与本次提交
 
-当前仅准备本地文件，等待用户指示提交 GitHub。尚未创建提交、Tag 或 GitHub Release，尚未推送分支及 CocoaPods Specs。后续先提交并推送代码，再创建并推送 2.4.0 Tag；GitHub Release 与 CocoaPods 发布分别处理。
+- GitHub [2.4.0 Release](https://github.com/13662049573/TFYSwiftRouterKit/releases/tag/2.4.0) 已存在，公开发布页显示 Tag 指向 `e40bf41`。
+- 本地已拉取远端 main 和 2.4.0 Tag；核验时二者均与本地 HEAD 相同，源码、Demo 和版本说明已包含在该提交中。
+- 本次提交修正文档中过期的“待发布”表述，进入 main；已发布的 2.4.0 Tag 保持原指向。
+- 主机测试重新执行，44 项全部通过；本次只修改版本注释和说明，未重复完整界面流程测试。
+- CocoaPods Trunk 查询仅包含 2.0.0，本次未执行 CocoaPods 发布。
+
+独立远端 SwiftPM 消费工程使用 `exact: "2.4.0"`，实际解析到 `e40bf415e3cdff4e74a2e1f7191b7a4baaa91040`；导入 TFYSwiftRouterCore 的示例已成功编译并运行。此验证仅覆盖 Core 产品，UIKit / SwiftUI 的独立 iOS 接入仍需单独验收。

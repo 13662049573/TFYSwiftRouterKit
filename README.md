@@ -6,9 +6,9 @@ App 管理容器与依赖，组件管理自己的 Route 和页面工厂。内置
 
 [从 0 到 1 完整中文指南](TFYSwiftRouterKit/TFYSwiftRouter/Documentation/TFYSwiftRouterKit-完整使用指南.md) · [视频项目 Demo](TFYSwiftRouterKit/TFYSwiftRouter/Documentation/TFYSwiftRouterKit-2.4.0更新说明.md#视频-demo) · [变更记录](CHANGELOG.md)
 
-本轮组件改进、Demo 重建、使用边界和提交说明见 [2.4.0 更新说明](TFYSwiftRouterKit/TFYSwiftRouter/Documentation/TFYSwiftRouterKit-2.4.0更新说明.md)；当前为本地待发布版本。
+本轮组件改进、Demo 重建、使用边界和提交说明见 [2.4.0 更新说明](TFYSwiftRouterKit/TFYSwiftRouter/Documentation/TFYSwiftRouterKit-2.4.0更新说明.md)；GitHub 2.4.0 已发布。
 
-> 当前开发版本：**2.4.0**（2026-10-01，待发布）。版本及说明已在本地准备，GitHub Tag / Release 与 CocoaPods 发布尚未执行。
+> 当前版本：**2.4.0**（2026-10-01，[GitHub 已发布](https://github.com/13662049573/TFYSwiftRouterKit/releases/tag/2.4.0)）。Tag 指向 `e40bf41`；CocoaPods Trunk 尚未收录 2.4.0。
 
 ## 3 分钟开始使用
 
@@ -66,7 +66,7 @@ try await assembly.router.open(AppRoute.detail(id: "1001"), presentation: .push(
 
 | 版本 | 日期 | 更新重点 |
 |---|---|---|
-| 2.4.0（待发布） | 2026-10-01 | 并发导航、恢复隔离、Session 等待者与取消修复；五入口视频 Demo |
+| 2.4.0 | 2026-10-01 | 并发导航、恢复隔离、Session 等待者与取消修复；五入口视频 Demo |
 | 2.3.0 | 2026-09-21 | 结构化事件诊断、目标 ID 跟踪与设备 SDK 验证流水线 |
 | 2.2.0 | 2026-09-21 | 简化页面注册、闭包拦截器、等待 UIKit 转场完成 |
 | 2.1.0 | 2026-09-20 | TabBar Scope、强类型页面上下文、有界会话缓冲与恢复回滚 |
@@ -77,7 +77,7 @@ try await assembly.router.open(AppRoute.detail(id: "1001"), presentation: .push(
 - 继续使用现有 Route、Assembly 与模块产品；仓库 Demo 的更换不引入组件运行时业务依赖。
 - 使用 RestorationCoordinator 时自动进入恢复上下文。直接操作 Driver 检查点时，在 `router.withNavigationRestoration(scopes:operation:)` 中创建并提交或回滚，并将重放请求标记为 `source: .restoration`。
 - 取消一个 Session 结果等待任务只结束对应订阅；需要结束整个会话时调用 `session.cancel()`。结果、取消和超时均不自动关闭页面，由调用方等待 `dismiss` 完成。
-- 新版 Tag 和 CocoaPods Specs 发布前使用本地路径集成；发布后再按下方示例升级远端依赖。
+- SwiftPM 可直接使用已发布的 2.4.0 Tag。CocoaPods 2.4.0 尚未收录到 Trunk，验证新版源码时使用本地路径集成。
 
 ### 版本关联与发布顺序
 
@@ -88,13 +88,14 @@ try await assembly.router.open(AppRoute.detail(id: "1001"), presentation: .push(
 | README / 完整指南 / CHANGELOG | 文档中的 2.4.0 声明 | 安装、迁移、更新说明保持一致 |
 | Demo Xcode 工程 | `MARKETING_VERSION = 2.4.0` | 运行示例时显示与组件发布相同的版本 |
 
-建议在发布前依次执行：
+本版本发布状态：
 
-1. 完成构建、测试、`swift package dump-package` 和 `pod lib lint`。
-2. 提交本版本的代码、Demo、Podspec 与文档。
-3. 在该提交创建并推送 `2.4.0` Tag，SwiftPM 随即可以解析该版本。
-4. 以同一 Tag 执行 `pod trunk push TFYSwiftRouterKit.podspec`。
-5. 将 [CHANGELOG 的 2.4.0 内容](CHANGELOG.md)作为 GitHub Release 说明，并再次验证远端 SPM/CocoaPods 接入。
+1. 2.4.0 源码、Demo、Podspec 与文档已提交到 [`e40bf41`](https://github.com/13662049573/TFYSwiftRouterKit/commit/e40bf415e3cdff4e74a2e1f7191b7a4baaa91040)。
+2. GitHub [2.4.0 Release](https://github.com/13662049573/TFYSwiftRouterKit/releases/tag/2.4.0) 与同名 Tag 已核验，Tag 固定指向该提交。
+3. SwiftPM 使用该 Tag 解析版本；CocoaPods 需要单独发布 Specs，本次不执行 CocoaPods 发布。
+4. 本次文档状态修正作为后续提交进入 `main`，保留 2.4.0 已发布 Tag 的指向。
+
+后续版本按“验证源码 → 提交并推送代码 → 创建版本 Tag / Release → 按需发布 CocoaPods Specs”的顺序准备。
 
 ## 先运行 Demo
 
@@ -132,7 +133,7 @@ try await assembly.router.open(AppRoute.detail(id: "1001"), presentation: .push(
 
 本地试用：在 Xcode 添加本地 Package，选择本仓库根目录，然后选择需要的产品。
 
-`2.4.0` Tag 发布后进行远端接入：在 Xcode 的 Add Package Dependencies 中填写 `https://github.com/13662049573/TFYSwiftRouterKit.git`，Dependency Rule 选择 **Up to Next Major Version**，起始版本填写 `2.4.0`。其他 Package 的清单写法如下：
+`2.4.0` Tag 已发布。进行远端接入：在 Xcode 的 Add Package Dependencies 中填写 `https://github.com/13662049573/TFYSwiftRouterKit.git`，Dependency Rule 选择 **Up to Next Major Version**，起始版本填写 `2.4.0`。其他 Package 的清单写法如下：
 
 ~~~swift
 dependencies: [
@@ -172,7 +173,7 @@ import TFYSwiftRouterKit
 
 ### CocoaPods
 
-`2.4.0` 发布到 CocoaPods 后使用：
+截至 2026-10-01，CocoaPods Trunk 只检索到 2.0.0，尚未收录 2.4.0。以下远端依赖示例仅在 2.4.0 Specs 发布后使用：
 
 ~~~ruby
 platform :ios, '16.0'
@@ -188,7 +189,7 @@ target 'MyApp' do
 end
 ~~~
 
-验证尚未发布的工作区源码时，在自己的 Podfile 中使用本地路径：
+通过 CocoaPods 验证 2.4.0 源码时，在自己的 Podfile 中使用本地路径：
 
 ~~~ruby
 platform :ios, '16.0'

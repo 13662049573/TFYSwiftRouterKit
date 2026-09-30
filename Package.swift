@@ -1,8 +1,8 @@
 // swift-tools-version: 6.0
 // 当前清单对应 TFYSwiftRouterKit 2.4.0。
-// 准备日期：2026-10-01；本地待发布，尚未创建或推送本版本 Tag。
+// 发布日期：2026-10-01；GitHub Release 与同名 Tag 已核验，2.4.0 指向 e40bf41。
 // 2.4.0：补强同 Scope 导航提交、恢复隔离、独立结果等待及取消边界；重建五入口视频 Demo。
-// Swift Package Manager 不在清单内声明包版本，而是从 Git Tag 解析版本；发布时需创建 2.4.0 Tag。
+// Swift Package Manager 不在清单内声明包版本，而是从已发布的 Git Tag 2.4.0 解析版本。
 // 完整更新与迁移说明见仓库根目录 CHANGELOG.md。
 // 本版本详细说明：TFYSwiftRouterKit/TFYSwiftRouter/Documentation/TFYSwiftRouterKit-2.4.0更新说明.md。
 import PackageDescription

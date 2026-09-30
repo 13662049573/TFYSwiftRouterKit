@@ -2,7 +2,7 @@
 
 本文件记录 TFYSwiftRouterKit 的用户可见变更。版本遵循语义化版本；SwiftPM 使用同名 Git Tag，CocoaPods 使用 `TFYSwiftRouterKit.podspec` 中的版本。
 
-## 2.4.0 - 2026-10-01（待发布）
+## 2.4.0 - 2026-10-01
 
 - 同一 Router/Scope 的导航提交、去重激活与回退串行执行；异步解析后再次检查去重，并拒绝可能死锁的嵌套提交。空闲 Scope 的提交队列及时释放。
 - 状态恢复增加 Scope 拥有者与平台检查点隔离，保留原交互资源直到提交；UIKit 暂停栈交互/返回手势，SwiftUI 忽略恢复中的旧路径更新，Tab 回滚避免覆盖其他导航的新选择。
@@ -25,9 +25,9 @@
 
 ### 发布关联
 
-- 本地版本已准备，尚未创建 Git 提交、Tag 或 GitHub Release。
-- SwiftPM：后续发布使用 Git Tag `2.4.0`；Tag 创建及推送前，远端依赖不能解析此新版本。
-- CocoaPods：`spec.version` 为 `2.4.0`，源码与文档链接自动引用同一版本；尚未推送 Specs。
+- GitHub [2.4.0 Release](https://github.com/13662049573/TFYSwiftRouterKit/releases/tag/2.4.0) 已发布，Tag 指向源码提交 `e40bf41`。
+- SwiftPM：使用已发布的 Git Tag `2.4.0` 解析版本。
+- CocoaPods：`spec.version` 为 `2.4.0`，源码与文档链接引用同一版本；2026-10-01 的 Trunk 查询仅包含 2.0.0，2.4.0 尚未收录。
 - Demo：App 与测试 Target 的 `MARKETING_VERSION` 同为 `2.4.0`，设置页从 Bundle 读取版本。
 - 发布说明与建议提交描述见 [2.4.0 发布说明](TFYSwiftRouterKit/TFYSwiftRouter/Documentation/TFYSwiftRouterKit-2.4.0更新说明.md)。
 
