@@ -72,6 +72,20 @@ public final class TFYSwiftRouterAssembly {
         guard !tabs.isEmpty else {
             throw TFYSwiftRouteError.presentationFailed("At least one tab is required")
         }
+        // Validate before replacing the host's tabs or installing delegate observers.
+        var scopes = Set<TFYSwiftNavigationScopeID>()
+        var containers = Set<ObjectIdentifier>()
+        for tab in tabs {
+            guard scopes.insert(tab.scope).inserted else {
+                throw TFYSwiftRouteError.duplicateRegistration("navigation scope: \(tab.scope.rawValue)")
+            }
+            guard containers.insert(ObjectIdentifier(tab.navigationController)).inserted else {
+                throw TFYSwiftRouteError.duplicateRegistration("navigation controller: \(tab.scope.rawValue)")
+            }
+        }
+        guard scopes.contains(initialScope) else {
+            throw TFYSwiftRouteError.scopeUnavailable(initialScope.rawValue)
+        }
 
         let routes = TFYSwiftRouteRegistry()
         let destinations = TFYSwiftUIKitDestinationRegistry()

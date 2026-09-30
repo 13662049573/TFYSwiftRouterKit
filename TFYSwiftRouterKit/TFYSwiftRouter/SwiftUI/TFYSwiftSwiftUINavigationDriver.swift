@@ -291,6 +291,18 @@ public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNa
             fullScreen = nil
             return true
         }
+        // Match the closest stack entry, just like UIKit's last matching controller.
+        // A route can occur both at root and in path when opened with no deduplication.
+        if let index = path.lastIndex(where: { $0.route == route }) {
+            fullScreen?.interaction?.cancel()
+            sheet?.interaction?.cancel()
+            fullScreen = nil
+            sheet = nil
+            let removed = Array(path.suffix(from: path.index(after: index)))
+            cancel(entries: removed)
+            path = Array(path.prefix(through: index))
+            return true
+        }
         if rootEntry?.route == route {
             fullScreen?.interaction?.cancel()
             sheet?.interaction?.cancel()
@@ -300,15 +312,7 @@ public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNa
             path.removeAll()
             return true
         }
-        guard let index = path.lastIndex(where: { $0.route == route }) else { return false }
-        fullScreen?.interaction?.cancel()
-        sheet?.interaction?.cancel()
-        fullScreen = nil
-        sheet = nil
-        let removed = Array(path.suffix(from: path.index(after: index)))
-        cancel(entries: removed)
-        path = Array(path.prefix(through: index))
-        return true
+        return false
     }
 
     /// 返回当前驱动追踪的地址，包含受支持的模态页面。

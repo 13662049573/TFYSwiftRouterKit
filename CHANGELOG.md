@@ -2,7 +2,34 @@
 
 本文件记录 TFYSwiftRouterKit 的用户可见变更。版本遵循语义化版本；SwiftPM 使用同名 Git Tag，CocoaPods 使用 `TFYSwiftRouterKit.podspec` 中的版本。
 
-## Unreleased
+## 2.4.0 - 2026-10-01（待发布）
+
+- 同一 Router/Scope 的导航提交、去重激活与回退串行执行；异步解析后再次检查去重，并拒绝可能死锁的嵌套提交。空闲 Scope 的提交队列及时释放。
+- 状态恢复增加 Scope 拥有者与平台检查点隔离，保留原交互资源直到提交；UIKit 暂停栈交互/返回手势，SwiftUI 忽略恢复中的旧路径更新，Tab 回滚避免覆盖其他导航的新选择。
+- Session 最终结果支持独立多等待者；取消等待任务不结束会话，主动 cancel 或任一 value 超时结束全部等待者和通信流。
+- History 修改容量时立即裁剪并归一化为至少 1。
+- 修复 Testing 旧会话结束时移除同地址新会话记录的问题，并在 Provider 前后检查任务取消。
+- DeepLink 和 Interceptor 在每个处理器前后检查取消，阻止迟到结果或后续业务调用。
+- TabBar Assembly 在修改宿主 UI/代理前验证重复 Scope、重复容器与初始 Scope。
+- SwiftUI singleTask 与 UIKit 一致，优先激活最近的匹配栈条目。
+- 补充并发提交、独立结果等待、取消、初始化失败无副作用、恢复隔离和重复地址复用测试，以及更新说明。
+
+- 删除旧能力工作台 Demo，从零重建首页、免费、加号发布、会员、我的五入口视频项目，保持每个 Feature 的 ViewController / Model / Routes / Router 结构。
+- 首页按参考图片实现黑色两列海报列表、搜索栏和悬浮玻璃底栏；二级页面隐藏底栏，返回根页恢复。
+- 补充搜索、详情、收藏、观看历史、模拟播放、登录续接、影评发布和会员订单；海报后台解码缓存，列表复用时校验内容身份。
+
+### 行为与接入提醒
+
+- 直接使用内置 Driver 检查点时，必须在 `router.withNavigationRestoration(scopes:operation:)` 上下文内创建并提交/回滚；重放使用 `source: .restoration`。使用 RestorationCoordinator 的普通接入自动满足此条件。
+- 取消 Session 的等待任务只取消该订阅；放弃整个流程时显式调用 `session.cancel()`。取消和超时仍不自动关闭 UI。
+
+### 发布关联
+
+- 本地版本已准备，尚未创建 Git 提交、Tag 或 GitHub Release。
+- SwiftPM：后续发布使用 Git Tag `2.4.0`；Tag 创建及推送前，远端依赖不能解析此新版本。
+- CocoaPods：`spec.version` 为 `2.4.0`，源码与文档链接自动引用同一版本；尚未推送 Specs。
+- Demo：App 与测试 Target 的 `MARKETING_VERSION` 同为 `2.4.0`，设置页从 Bundle 读取版本。
+- 发布说明与建议提交描述见 [2.4.0 发布说明](TFYSwiftRouterKit/TFYSwiftRouter/Documentation/TFYSwiftRouterKit-2.4.0更新说明.md)。
 
 ## 2.3.0 - 2026-09-21
 

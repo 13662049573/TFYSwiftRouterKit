@@ -1,6 +1,6 @@
 # TFYSwiftRouterKit 完整使用指南：从 0 到 1
 
-本文对应 TFYSwiftRouterKit 2.3.0 与当前 `ClassDemo`。目标是从空 UIKit 工程完成单栈路由，再升级到组件级 TabBar 路由、强类型结果、双向 Session、Deep Link、恢复和测试。
+本文对应 TFYSwiftRouterKit 2.4.0 与当前 `ClassDemo`。目标是从空 UIKit 工程完成单栈路由，再升级到组件级 TabBar 路由、强类型结果、双向 Session、Deep Link、恢复和测试。
 
 ## 1. 安装
 
@@ -10,7 +10,7 @@
 dependencies: [
     .package(
         url: "https://github.com/13662049573/TFYSwiftRouterKit.git",
-        from: "2.3.0"
+        from: "2.4.0"
     )
 ]
 ~~~
@@ -243,6 +243,10 @@ eventTask.cancel()
 
 页面通过 `context.commands()` 消费命令、`context.send(...)` 发送连续事件、`context.finish(...)` 完成最终输出。`session.cancel()` 会结束等待、Command 和 Event 生命周期，但不会隐式关闭 UI。
 
+多个任务可以独立等待同一个最终输出；取消一个等待任务只移除该订阅，其他等待者与页面通信继续。`value(timeout:)` 从本次调用开始计时，任一等待超时会以 `timeout` 结束整个 Session。主动 `cancel()` 和已发布结果遵循首次终态规则；结果任务经异步桥接发布，发布前取消可能先于底层成功结果。
+
+同一 Router/Scope 的导航提交串行执行，Interceptor/Resolver 仍可并发挂起，并发请求会在提交前重新检查去重。不要在呈现回调中等待需要同一忙碌 Scope 的嵌套导航；应在呈现完成后再发起。
+
 ## 7. 拦截器与 Deep Link
 
 拦截器可以 `proceed`、`reject`、`redirect` 或 `suspend`。重定向和恢复后的请求仍走完整 Router 流水线。
@@ -292,6 +296,10 @@ try await restoration.restore(decoded)
 ~~~
 
 恢复先完成迁移和全量解码，再为受影响 Scope 创建页面实例级检查点。任一 Scope 展示失败或任务取消时，UIKit、SwiftUI 和 Scoped Driver 会回滚已修改的页面栈。Sheet、Input、Session、服务实例、选中 Tab 和滚动位置不在快照中。
+
+恢复期间，受影响 Scope 拒绝无关任务导航及重叠恢复，其他 Scope 可以正常导航。UIKit 暂停该栈的点击和返回手势，SwiftUI 暂停宿主交互并忽略旧路径回写。自定义 Driver 应在检查点创建时读取 `TFYSwiftNavigationOperationContext.restorationID` 并实现对应隔离。
+
+直接使用检查点的高级场景需要在 `router.withNavigationRestoration(scopes:operation:)` 内完成创建、重放和提交/回滚，重放请求使用 `.restoration` 来源。普通接入交给 `TFYSwiftRestorationCoordinator.restore` 自动管理；不要在恢复上下文外直接创建内置 Driver 检查点。
 
 ## 9. 组件服务与注册事务
 
@@ -344,30 +352,27 @@ assert(result == "selected")
 assert(router.invocations.last?.scope == "test")
 ~~~
 
-## 12. Demo 0→1 操作顺序
+## 12. 当前视频项目 Demo
 
-1. “开始”点击“打开详情”，确认普通 Push。
-2. 点击“自动跨 Tab”，确认组件自动选择“演练”并 Push。
-3. 返回“开始”，点击“等待页面结果”，选择一项并确认调用方反馈。
-4. 点击“双向会话”，确认命令、页面事件和最终输出。
-5. 在“演练”操作全部呈现方式、singleTop/singleTask、拦截和 Deep Link。
-6. 操作超时、主动取消、注册事务、组件服务和导航快照。
-7. 在“导航栈”检查四个 Scope，在“事件”核对事务生命周期。
+1. 首页打开内容详情，返回时确认底栏恢复；在免费专区重复检查同一行为。
+2. 搜索“重器”，验证过滤和空结果；点击海报进入详情。
+3. 收藏一部内容，在“我的 → 我的收藏”查看；播放后在观看历史查看。
+4. 点击中间加号，游客先登录，再继续填写影评；发布后在“我的作品”查看。
+5. 在会员页选择套餐，登录后继续模拟结算，确认会员权益更新。
+6. 使用 `tfyswift://video/comedy` 检查外部视频入口。
 
 ~~~text
 ClassDemo/
-├─ App/TFYDemoAppCoordinator.swift
-├─ Start/
-│  ├─ TFYDemoStartViewController.swift
-│  ├─ TFYDemoStartModel.swift
-│  ├─ TFYDemoStartRoutes.swift
-│  └─ TFYDemoStartRouter.swift
-├─ Playground/                     同样由 ViewController / Model / Routes / Router 组成
-├─ Stack/                          同样由 ViewController / Model / Routes / Router 组成
-└─ Timeline/                       同样由 ViewController / Model / Routes / Router 组成
+├─ App/                            组合根与悬浮 TabBar
+├─ Home/                           ViewController / Model / Routes / Router
+├─ Free/                           同上
+├─ Publish/                        同上
+├─ Member/                         同上
+├─ Profile/                        同上
+└─ Shared/                         主题、状态、海报缓存与业务共用页面
 ~~~
 
-四个 Feature Router 都实现 `TFYSwiftUIKitComponentModule`。AppCoordinator 只创建容器并调用 `registerComponents`，不构造具体页面，也不集中处理业务 Action。
+AppCoordinator 组装独立 Scope 并登记 Feature 工厂。登录、发布和结算使用强类型 Input / Output；页面返回结果后由调用方等待 Router dismiss 完成。详细素材边界与操作说明见 [2.4.0 更新说明](TFYSwiftRouterKit-2.4.0更新说明.md)。组件 Session、恢复与 SwiftUI API 不受 Demo 更换影响。
 
 ## 13. 接入检查
 

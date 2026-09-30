@@ -1,6 +1,10 @@
+# TFYSwiftRouterKit 2.4.0，准备日期：2026-10-01，当前为本地待发布版本。
+# 源码 Tag 和文档链接使用 spec.version；提交 GitHub 与发布 CocoaPods 后才可远端安装。
+# 本次改进：同 Scope 导航提交、恢复隔离、独立结果等待及取消边界。
+# 详细更新说明见 CHANGELOG.md 与 TFYSwiftRouterKit/TFYSwiftRouter/Documentation/TFYSwiftRouterKit-2.4.0更新说明.md。
 Pod::Spec.new do |spec|
   spec.name         = 'TFYSwiftRouterKit'
-  spec.version      = '2.3.0'
+  spec.version      = '2.4.0'
   spec.summary      = 'Swift 6 强类型通用 iOS 组件路由，支持多导航域、双向会话、Deep Link、恢复与测试。'
 
   spec.description  = <<-DESC
@@ -9,10 +13,13 @@ Pod::Spec.new do |spec|
     Command/Event/Output 双向会话、事务注册、超时取消、Deep Link、状态恢复、组件服务和测试替身。
     路由核心不绑定业务名称、固定 URL、图片、文案或持久化键；产品资源和降级界面均由 App 注入。
     组件根页面同样通过 Route 注册，App 壳无需直接依赖业务 UIViewController。
+    2.4.0 加强同一导航域的提交串行化、恢复检查点隔离、Session 独立结果等待与取消一致性，
+    修复 Tab 初始化失败的副作用、测试会话清理及 SwiftUI 最近匹配行为。
+    仓库提供独立的五入口视频项目 Demo；Demo 代码与素材不包含在 Pod 的组件源码中。
   DESC
 
   spec.homepage     = 'https://github.com/13662049573/TFYSwiftRouterKit'
-  spec.documentation_url = 'https://github.com/13662049573/TFYSwiftRouterKit/tree/2.3.0#readme'
+  spec.documentation_url = "https://github.com/13662049573/TFYSwiftRouterKit/tree/#{spec.version}#readme"
   spec.license      = { :type => 'MIT', :file => 'LICENSE' }
   spec.author       = { '田风有' => '420144542@qq.com' }
   spec.source       = {

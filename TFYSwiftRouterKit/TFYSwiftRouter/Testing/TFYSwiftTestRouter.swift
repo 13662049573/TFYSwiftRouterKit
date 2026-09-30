@@ -84,7 +84,8 @@ public final class TFYSwiftTestRouter: TFYSwiftRouting {
         )] = result
     }
 
-    /// 取得测试会话当前的通信对象，以模拟目标页面事件和命令消费。
+    /// 取得该地址最新登记的测试会话，以模拟页面事件和命令消费。
+    /// 同地址可以并发打开；旧会话结束不会移除新会话，查询不广播到全部会话。
     public func interaction<R: TFYSwiftRoute>(for route: R) -> TFYSwiftRouteInteraction? {
         interactions[TFYSwiftAnyRoute(route)]
     }
@@ -115,7 +116,9 @@ public final class TFYSwiftTestRouter: TFYSwiftRouting {
         guard let provider = provider(for: TFYSwiftAnyRoute(route), resultType: Result.self) else {
             throw TFYSwiftRouteError.destinationUnavailable("测试未配置 \(Result.self) 返回值")
         }
+        try checkCancellation()
         let value = try await provider()
+        try checkCancellation()
         guard let typedValue = value as? Result else {
             throw TFYSwiftRouteError.resultTypeMismatch(
                 expected: String(reflecting: Result.self),
@@ -153,7 +156,9 @@ public final class TFYSwiftTestRouter: TFYSwiftRouting {
         guard let provider = provider(for: TFYSwiftAnyRoute(route), resultType: Result.self) else {
             throw TFYSwiftRouteError.destinationUnavailable("测试未配置 \(Result.self) 返回值")
         }
+        try checkCancellation()
         let value = try await provider()
+        try checkCancellation()
         guard let typedValue = value as? Result else {
             throw TFYSwiftRouteError.resultTypeMismatch(
                 expected: String(reflecting: Result.self),
@@ -199,12 +204,16 @@ public final class TFYSwiftTestRouter: TFYSwiftRouting {
             guard let self else { throw TFYSwiftRouteError.cancelled }
             defer {
                 interaction.finishChannels()
-                self.interactions.removeValue(forKey: anyRoute)
+                if self.interactions[anyRoute] === interaction {
+                    self.interactions.removeValue(forKey: anyRoute)
+                }
             }
+            try self.checkCancellation()
             guard let provider = self.provider(for: anyRoute, resultType: Output.self) else {
                 throw TFYSwiftRouteError.destinationUnavailable("测试未配置 \(Output.self) 返回值")
             }
             let value = try await provider()
+            try self.checkCancellation()
             guard let output = value as? Output else {
                 throw TFYSwiftRouteError.resultTypeMismatch(
                     expected: String(reflecting: Output.self),
@@ -236,6 +245,10 @@ public final class TFYSwiftTestRouter: TFYSwiftRouting {
     /// 关闭当前 Scope 的全部模态页面及其交互。
     public func dismissAll(scope: TFYSwiftNavigationScopeID) async throws {
         recordNavigation(.dismissAll, scope: scope)
+    }
+
+    private func checkCancellation() throws {
+        if Task.isCancelled { throw TFYSwiftRouteError.cancelled }
     }
 
     private func provider<Result: Sendable>(

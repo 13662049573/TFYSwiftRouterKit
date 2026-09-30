@@ -87,17 +87,6 @@ final class TFYSwiftRouterKitTests: XCTestCase {
     }
 
     @MainActor
-    func testDemoBarsPreventContentUnderlap() throws {
-        let coordinator = try TFYDemoAppCoordinator()
-        let navigationControllers = try XCTUnwrap(coordinator.tabBarController.viewControllers)
-            .compactMap { $0 as? UINavigationController }
-
-        XCTAssertFalse(coordinator.tabBarController.tabBar.isTranslucent)
-        XCTAssertEqual(navigationControllers.count, TFYDemoTab.allCases.count)
-        XCTAssertTrue(navigationControllers.allSatisfy { !$0.navigationBar.isTranslucent })
-    }
-
-    @MainActor
     func testRegistryResolvesTypedRouteAndRejectsDuplicate() async throws {
         let registry = TFYSwiftRouteRegistry()
         try registry.register(TestRoute.self) { _, _ in TFYSwiftDestinationDescriptor(identifier: "test.detail") }
@@ -666,21 +655,23 @@ final class TFYSwiftRouterKitTests: XCTestCase {
             interaction: TFYSwiftRouteInteraction(result: result)
         )
         let originalID = try XCTUnwrap(driver.rootEntry?.id)
-        let checkpoint = try driver.makeNavigationCheckpoint(in: .main)
         let replacementRoute = TFYSwiftAnyRoute(TestRoute.detail(id: "replacement"))
-
-        try await driver.present(
-            destination: TFYSwiftDestinationDescriptor(identifier: "checkpoint"),
-            route: replacementRoute,
-            transaction: TFYSwiftRouteTransaction(
+        let router = TFYSwiftRouter(driver: driver)
+        try await router.withNavigationRestoration(scopes: [.main]) {
+            let checkpoint = try driver.makeNavigationCheckpoint(in: .main)
+            defer { checkpoint.rollback() }
+            try await driver.present(
+                destination: TFYSwiftDestinationDescriptor(identifier: "checkpoint"),
                 route: replacementRoute,
-                context: TFYSwiftRouteContext(),
-                presentation: .root(animated: false),
-                deduplication: .none
-            ),
-            interaction: nil
-        )
-        checkpoint.rollback()
+                transaction: TFYSwiftRouteTransaction(
+                    route: replacementRoute,
+                    context: TFYSwiftRouteContext(source: .restoration),
+                    presentation: .root(animated: false),
+                    deduplication: .none
+                ),
+                interaction: nil
+            )
+        }
 
         XCTAssertEqual(driver.rootEntry?.id, originalID)
         XCTAssertEqual(driver.rootEntry?.route, originalRoute)

@@ -70,7 +70,7 @@ public struct TFYSwiftDeepLinkPolicy: Sendable {
     }
 }
 
-/// actor 隔离的解析引擎；只负责校验和解析，选 Tab 由 App 完成。
+/// actor 隔离的解析引擎；只负责校验和解析，目标 Scope 的 Tab 选择由导航驱动处理。
 public actor TFYSwiftDeepLinkEngine {
     private struct Entry {
         let priority: Int
@@ -105,9 +105,13 @@ public actor TFYSwiftDeepLinkEngine {
 
     /// 将请求/持久化描述符解码成地址；无法匹配或数据非法时抛错。
     public func route(for request: TFYSwiftDeepLinkRequest) async throws -> TFYSwiftAnyRoute {
+        try Task.checkCancellation()
         try validate(request.url)
         for entry in parsers {
-            if let route = try await entry.parser.parse(request) { return route }
+            try Task.checkCancellation()
+            let route = try await entry.parser.parse(request)
+            try Task.checkCancellation()
+            if let route { return route }
         }
         throw TFYSwiftRouteError.invalidDeepLink("没有 Parser 能处理该链接")
     }

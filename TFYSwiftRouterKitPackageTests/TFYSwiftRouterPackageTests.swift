@@ -318,8 +318,9 @@ final class TFYSwiftRouterPackageTests: XCTestCase {
         )
         let source = try String(contentsOf: coordinator, encoding: .utf8)
 
-        XCTAssertTrue(source.contains("registerComponents"))
-        for module in ["Start", "Playground", "Stack", "Timeline"] {
+        XCTAssertTrue(source.contains("assembly.register("))
+        XCTAssertTrue(source.contains("assembly.registerTyped("))
+        for module in ["Home", "Free", "Publish", "Member", "Profile"] {
             for suffix in ["ViewController", "Model", "Routes", "Router"] {
                 let file = demo.appendingPathComponent("\(module)/TFYDemo\(module)\(suffix).swift")
                 XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "缺少模块文件：\(file.path)")
@@ -328,10 +329,11 @@ final class TFYSwiftRouterPackageTests: XCTestCase {
         for forbidden in [
             "makeRootViewController",
             "registerDestinations",
-            "TFYDemoStartViewController",
-            "TFYDemoPlaygroundViewController",
-            "TFYDemoStackViewController",
-            "TFYDemoTimelineViewController"
+            "TFYDemoHomeViewController",
+            "TFYDemoFreeViewController",
+            "TFYDemoMemberViewController",
+            "TFYDemoProfileViewController",
+            "TFYDemoPublishViewController"
         ] {
             XCTAssertFalse(source.contains(forbidden), "Coordinator 泄漏了具体页面：\(forbidden)")
         }

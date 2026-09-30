@@ -588,6 +588,21 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
         return gate
     }
 
+    private func withNavigationCommit<Value: Sendable>(
+        in scope: TFYSwiftNavigationScopeID,
+        operation: @MainActor () async throws -> Value
+    ) async throws -> Value {
+        let gate = commitGate(in: scope)
+        defer {
+            // A resumed waiter already owns the gate. Only the final caller may
+            // remove it, including when a presentation fails or a task is cancelled.
+            if !gate.isBusy, commitGates[scope] === gate {
+                commitGates.removeValue(forKey: scope)
+            }
+        }
+        return try await gate.perform(operation)
+    }
+
     private func validateNavigationAccess(
         in scope: TFYSwiftNavigationScopeID,
         source: TFYSwiftRouteSource? = nil
@@ -604,7 +619,7 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
         operation: @MainActor () async throws -> Void
     ) async throws {
         try validateNavigationAccess(in: scope)
-        try await commitGate(in: scope).perform {
+        try await withNavigationCommit(in: scope) {
             try self.validateNavigationAccess(in: scope)
             try await operation()
         }
@@ -675,7 +690,7 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
         try validateNavigationAccess(in: scope, source: transaction.context.source)
         // Keep the fast path for an already visible destination, but serialize
         // activation too because a custom driver may suspend while activating.
-        if try await commitGate(in: scope).perform({
+        if try await withNavigationCommit(in: scope, operation: {
             try self.validateNavigationAccess(in: scope, source: transaction.context.source)
             return try await self.deduplicate(transaction, interaction: interaction)
         }) { return transaction }
@@ -688,7 +703,7 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
         activeTransactions[transaction.id] = transaction
         emit(transaction, .resolved, message: destination.identifier)
 
-        return try await commitGate(in: scope).perform {
+        return try await withNavigationCommit(in: scope) {
             try self.validateNavigationAccess(in: scope, source: transaction.context.source)
             // Resolution suspends: repeat the check while owning the commit gate.
             // Hold it through present(), including asynchronous custom drivers.

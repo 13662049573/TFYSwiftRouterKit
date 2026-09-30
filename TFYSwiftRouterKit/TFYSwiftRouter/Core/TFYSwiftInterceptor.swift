@@ -96,8 +96,11 @@ public final class TFYSwiftInterceptorPipeline {
 
     /// 从高到低依次执行拦截器，遇到第一个非放行结果立即返回。
     public func run(_ transaction: TFYSwiftRouteTransaction) async -> TFYSwiftRouteInterceptionResult {
+        guard !Task.isCancelled else { return .reject(.cancelled) }
         for entry in entries {
+            guard !Task.isCancelled else { return .reject(.cancelled) }
             let result = await entry.interceptor.intercept(transaction)
+            guard !Task.isCancelled else { return .reject(.cancelled) }
             if case .proceed = result { continue }
             return result
         }
