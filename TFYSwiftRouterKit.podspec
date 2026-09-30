@@ -1,5 +1,5 @@
 # TFYSwiftRouterKit 2.4.0，GitHub 发布日期：2026-10-01，Tag 指向 e40bf41。
-# 源码 Tag 和文档链接使用 spec.version；CocoaPods Trunk 尚未收录 2.4.0，需单独发布 Specs。
+# 源码 Tag 和文档链接使用 spec.version；CocoaPods 2.4.0 已于 2026-10-01 发布并核验 Trunk / Specs。
 # 本次改进：同 Scope 导航提交、恢复隔离、独立结果等待及取消边界。
 # 详细更新说明见 CHANGELOG.md 与 TFYSwiftRouterKit/TFYSwiftRouter/Documentation/TFYSwiftRouterKit-2.4.0更新说明.md。
 Pod::Spec.new do |spec|

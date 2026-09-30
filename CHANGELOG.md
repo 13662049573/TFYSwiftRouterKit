@@ -27,7 +27,7 @@
 
 - GitHub [2.4.0 Release](https://github.com/13662049573/TFYSwiftRouterKit/releases/tag/2.4.0) 已发布，Tag 指向源码提交 `e40bf41`。
 - SwiftPM：使用已发布的 Git Tag `2.4.0` 解析版本。
-- CocoaPods：`spec.version` 为 `2.4.0`，源码与文档链接引用同一版本；2026-10-01 的 Trunk 查询仅包含 2.0.0，2.4.0 尚未收录。
+- CocoaPods：`spec.version` 为 `2.4.0`，源码与文档链接引用同一版本；2026-10-01 完成完整编译校验并发布 2.4.0，已核验 Trunk 与公开 Specs 收录。
 - Demo：App 与测试 Target 的 `MARKETING_VERSION` 同为 `2.4.0`，设置页从 Bundle 读取版本。
 - 发布说明与建议提交描述见 [2.4.0 发布说明](TFYSwiftRouterKit/TFYSwiftRouter/Documentation/TFYSwiftRouterKit-2.4.0更新说明.md)。
 

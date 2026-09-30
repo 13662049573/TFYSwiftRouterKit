@@ -8,7 +8,7 @@ App 管理容器与依赖，组件管理自己的 Route 和页面工厂。内置
 
 本轮组件改进、Demo 重建、使用边界和提交说明见 [2.4.0 更新说明](TFYSwiftRouterKit/TFYSwiftRouter/Documentation/TFYSwiftRouterKit-2.4.0更新说明.md)；GitHub 2.4.0 已发布。
 
-> 当前版本：**2.4.0**（2026-10-01，[GitHub 已发布](https://github.com/13662049573/TFYSwiftRouterKit/releases/tag/2.4.0)）。Tag 指向 `e40bf41`；CocoaPods Trunk 尚未收录 2.4.0。
+> 当前版本：**2.4.0**（2026-10-01，[GitHub 已发布](https://github.com/13662049573/TFYSwiftRouterKit/releases/tag/2.4.0)）。Tag 指向 `e40bf41`；CocoaPods Trunk 与公开 Specs 仓库已收录 2.4.0。
 
 ## 3 分钟开始使用
 
@@ -77,7 +77,7 @@ try await assembly.router.open(AppRoute.detail(id: "1001"), presentation: .push(
 - 继续使用现有 Route、Assembly 与模块产品；仓库 Demo 的更换不引入组件运行时业务依赖。
 - 使用 RestorationCoordinator 时自动进入恢复上下文。直接操作 Driver 检查点时，在 `router.withNavigationRestoration(scopes:operation:)` 中创建并提交或回滚，并将重放请求标记为 `source: .restoration`。
 - 取消一个 Session 结果等待任务只结束对应订阅；需要结束整个会话时调用 `session.cancel()`。结果、取消和超时均不自动关闭页面，由调用方等待 `dismiss` 完成。
-- SwiftPM 可直接使用已发布的 2.4.0 Tag。CocoaPods 2.4.0 尚未收录到 Trunk，验证新版源码时使用本地路径集成。
+- SwiftPM 可直接使用已发布的 2.4.0 Tag；CocoaPods 可通过 `~> 2.4` 集成新版。
 
 ### 版本关联与发布顺序
 
@@ -92,7 +92,7 @@ try await assembly.router.open(AppRoute.detail(id: "1001"), presentation: .push(
 
 1. 2.4.0 源码、Demo、Podspec 与文档已提交到 [`e40bf41`](https://github.com/13662049573/TFYSwiftRouterKit/commit/e40bf415e3cdff4e74a2e1f7191b7a4baaa91040)。
 2. GitHub [2.4.0 Release](https://github.com/13662049573/TFYSwiftRouterKit/releases/tag/2.4.0) 与同名 Tag 已核验，Tag 固定指向该提交。
-3. SwiftPM 使用该 Tag 解析版本；CocoaPods 需要单独发布 Specs，本次不执行 CocoaPods 发布。
+3. SwiftPM 使用该 Tag 解析版本；CocoaPods 2.4.0 已完成完整编译校验并发布，Trunk 与公开 Specs 均已核验。
 4. 本次文档状态修正作为后续提交进入 `main`，保留 2.4.0 已发布 Tag 的指向。
 
 后续版本按“验证源码 → 提交并推送代码 → 创建版本 Tag / Release → 按需发布 CocoaPods Specs”的顺序准备。
@@ -173,7 +173,7 @@ import TFYSwiftRouterKit
 
 ### CocoaPods
 
-截至 2026-10-01，CocoaPods Trunk 只检索到 2.0.0，尚未收录 2.4.0。以下远端依赖示例仅在 2.4.0 Specs 发布后使用：
+CocoaPods 2.4.0 已于 2026-10-01 发布，并核验 Trunk 与公开 Specs 中的源码 Tag。使用以下远端依赖；本地索引未更新时执行 `pod install --repo-update`。发布后 CDN 版本索引可能延迟同步，若暂时找不到 2.4.0，请稍后重试：
 
 ~~~ruby
 platform :ios, '16.0'
@@ -189,7 +189,7 @@ target 'MyApp' do
 end
 ~~~
 
-通过 CocoaPods 验证 2.4.0 源码时，在自己的 Podfile 中使用本地路径：
+本地开发组件时，也可在自己的 Podfile 中使用本地路径：
 
 ~~~ruby
 platform :ios, '16.0'

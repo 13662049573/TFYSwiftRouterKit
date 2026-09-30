@@ -1,6 +1,6 @@
 # TFYSwiftRouterKit 2.4.0 更新说明
 
-发布日期：2026-10-01。状态：[GitHub 2.4.0 已发布](https://github.com/13662049573/TFYSwiftRouterKit/releases/tag/2.4.0)，Tag 指向 `e40bf41`；CocoaPods 2.4.0 尚未收录到 Trunk。
+发布日期：2026-10-01。状态：[GitHub 2.4.0 已发布](https://github.com/13662049573/TFYSwiftRouterKit/releases/tag/2.4.0)，Tag 指向 `e40bf41`；CocoaPods Trunk 与公开 Specs 仓库已收录 2.4.0。
 
 2.4.0 加强并发导航、恢复隔离及取消一致性，并将旧 Demo 整体替换为五入口视频项目。继续采用 iOS 16+、Swift 6、SwiftPM / CocoaPods 按模块集成方式。
 
@@ -49,21 +49,21 @@
 | Demo 设置页 | 读取 App Bundle 的版本 |
 | README / 完整指南 / CHANGELOG | 同步至 2.4.0 |
 
-SwiftPM 可直接使用已发布 Tag 集成。CocoaPods 2.4.0 Specs 尚未收录，使用本地路径验证；README 中 CocoaPods 的 2.4.0 远端示例需等 Specs 发布后使用。
+SwiftPM 可直接使用已发布 Tag 集成；CocoaPods 使用 `pod 'TFYSwiftRouterKit', '~> 2.4'`。本地索引未更新时执行 `pod install --repo-update`，组件开发仍可使用本地路径。
 
 ## 验证记录
 
 2026-09-30 前一轮实现验证：44 项 SwiftPM 主机测试、56 项 iOS 单元测试、9 条界面流程通过；模拟器及未签名 generic iOS 设备 SDK 构建通过。2026-10-01 版本整理后的检查：
 
 - Package 清单解析和 Podspec Ruby 语法检查通过。
-- Podspec 快速校验通过；此校验不等同于独立 CocoaPods 消费工程构建。
+- Podspec 快速校验通过；发布时另执行完整 CocoaPods 校验，默认规格及七个子规格的 iOS 模拟器集成构建均通过。
 - Podspec 版本、源码 Tag、文档链接及 6 个 Xcode 配置的版本均为 2.4.0。
 - 未签名 generic iOS 设备 SDK 构建通过，构建产物版本为 2.4.0。
 - 文档本地链接和差异格式检查通过。
 
 本轮仅调整版本和说明，未重复完整界面流程测试。
 
-这些结果不代表 GitHub CI、最低系统版本真机、独立 UIKit / SwiftUI 消费工程或 CocoaPods Specs 发布验证已完成，也不包含真实设备帧率测量。
+这些结果不代表 GitHub CI、最低系统版本真机或独立业务 App 的 UIKit / SwiftUI 接入验收已完成，也不包含真实设备帧率测量。CocoaPods Specs 发布核验见下文。
 
 ## 建议 GitHub 提交说明
 
@@ -79,9 +79,10 @@ SwiftPM 可直接使用已发布 Tag 集成。CocoaPods 2.4.0 Specs 尚未收录
 ## 发布核验与本次提交
 
 - GitHub [2.4.0 Release](https://github.com/13662049573/TFYSwiftRouterKit/releases/tag/2.4.0) 已存在，公开发布页显示 Tag 指向 `e40bf41`。
-- 本地已拉取远端 main 和 2.4.0 Tag；核验时二者均与本地 HEAD 相同，源码、Demo 和版本说明已包含在该提交中。
+- 2.4.0 Tag 固定指向源码提交 `e40bf41`；main 中另包含后续发布状态文档，源码与版本配置一致。
 - 本次提交修正文档中过期的“待发布”表述，进入 main；已发布的 2.4.0 Tag 保持原指向。
 - 主机测试重新执行，44 项全部通过；本次只修改版本注释和说明，未重复完整界面流程测试。
-- CocoaPods Trunk 查询仅包含 2.0.0，本次未执行 CocoaPods 发布。
+- 2026-10-01 执行 CocoaPods Trunk 发布：完整校验的八次集成构建全部通过。提交返回 GitHub 接口超时后，分别查询 Trunk 版本、Trunk Podspec 与公开 Specs，均确认 2.4.0 已收录，源码指向 Tag `2.4.0`。
+- 公开规格：[TFYSwiftRouterKit 2.4.0 Podspec](https://github.com/CocoaPods/Specs/blob/master/Specs/d/1/6/TFYSwiftRouterKit/2.4.0/TFYSwiftRouterKit.podspec.json)。CDN 规格文件已可访问，但核验时版本索引仍只列出 2.0.0，独立 `pod install --repo-update` 暂未解析到 2.4.0。发布已由 Trunk 与公开 Specs 确认；CDN 远端安装需等待版本索引同步。
 
 独立远端 SwiftPM 消费工程使用 `exact: "2.4.0"`，实际解析到 `e40bf415e3cdff4e74a2e1f7191b7a4baaa91040`；导入 TFYSwiftRouterCore 的示例已成功编译并运行。此验证仅覆盖 Core 产品，UIKit / SwiftUI 的独立 iOS 接入仍需单独验收。
