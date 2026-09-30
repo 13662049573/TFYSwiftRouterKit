@@ -233,16 +233,19 @@ public final class TFYSwiftRestorationCoordinator {
         guard let checkpointing = router.driver as? any TFYSwiftNavigationCheckpointing else {
             throw TFYSwiftRouteError.restorationFailed("导航驱动不支持原子恢复")
         }
-        var checkpoints: [any TFYSwiftNavigationCheckpoint] = []
-        do {
-            for (scope, _) in affectedPlan {
-                checkpoints.append(try checkpointing.makeNavigationCheckpoint(in: scope))
+        try await router.withNavigationRestoration(scopes: affectedPlan.map { $0.0 }) {
+            var checkpoints: [any TFYSwiftNavigationCheckpoint] = []
+            do {
+                for (scope, _) in affectedPlan {
+                    checkpoints.append(try checkpointing.makeNavigationCheckpoint(in: scope))
+                }
+                try await self.apply(affectedPlan)
+                try Task.checkCancellation()
+                checkpoints.forEach { $0.commit() }
+            } catch {
+                checkpoints.reversed().forEach { $0.rollback() }
+                throw error
             }
-            try await apply(affectedPlan)
-            checkpoints.forEach { $0.commit() }
-        } catch {
-            checkpoints.reversed().forEach { $0.rollback() }
-            throw error
         }
     }
 

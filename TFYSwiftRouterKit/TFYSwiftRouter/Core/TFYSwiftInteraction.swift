@@ -302,13 +302,17 @@ public struct TFYSwiftDestinationContext {
 
 /// A bidirectional route session: commands go to the page, events and one final result come back.
 @MainActor
-/// 双向会话句柄；由调用方持有，并负责在流程结束或放弃时取消。
+/// 双向会话句柄；由调用方持有，并负责在放弃整个流程时调用 cancel()。
+/// 多个任务可以独立等待同一个最终结果；取消等待任务只取消该次订阅，不结束会话。
+/// cancel() 或任一 value(timeout:) 超时会结束整个会话，但不会自动关闭 UI。
+/// 终态以首次向会话发布为准；底层结果任务的完成通过一次异步桥接发布。
 public final class TFYSwiftRouteSession<Command: Sendable, Event: Sendable, Output: Sendable> {
     /// 事件中心、历史记录或会话事件流；具体语义由所属类型决定。
     public let events: AsyncStream<Event>
     private let commands: TFYSwiftRouteCommandChannel
     private let interaction: TFYSwiftRouteInteraction
     private let resultTask: Task<Output, Error>
+    private let resultState: TFYSwiftSessionResultState<Output>
 
     /// 组装会话句柄；通常由 Router/TestRouter 创建，调用方负责持有和取消。
     public init(
@@ -321,6 +325,14 @@ public final class TFYSwiftRouteSession<Command: Sendable, Event: Sendable, Outp
         self.commands = commands
         self.interaction = interaction
         self.resultTask = resultTask
+        let resultState = TFYSwiftSessionResultState<Output>()
+        self.resultState = resultState
+        // One bridge per session, not per waiter. Its weak capture does not keep the
+        // session/subscriptions alive while a custom producer ignores cancellation.
+        Task { @MainActor [weak resultState] in
+            let result = await resultTask.result
+            resultState?.finish(result)
+        }
     }
 
     /// 发送类型匹配的命令或事件；通道缺失、类型错误或已结束时抛错。
@@ -340,27 +352,90 @@ public final class TFYSwiftRouteSession<Command: Sendable, Event: Sendable, Outp
         }
     }
 
-    /// 异步等待唯一最终输出；成功、取消或失败由结果任务决定。
+    /// 独立等待最终输出；已完成的结果可重复读取。
+    /// 等待任务被取消时抛 cancelled，并移除本次订阅；其他等待者和页面不受影响。
     public var value: Output {
-        get async throws { try await resultTask.value }
+        get async throws { try await resultState.value() }
     }
 
-    /// 按声明类型读取输入或等待最终结果；类型不匹配和流程失败会抛错。
+    /// 从本次调用开始计时；超时以 timeout 结束整个会话及所有等待者，并关闭通信流。
+    /// 只取消调用此方法的任务会抛 cancelled，不取消会话，也不触发超时副作用。
     public func value(timeout: TimeInterval) async throws -> Output {
-        try await TFYSwiftTimeout.race(
+        if resultState.isFinished { return try await resultState.value() }
+        return try await TFYSwiftTimeout.race(
             timeout: timeout,
-            operation: { try await self.resultTask.value },
-            onTimeout: {
-                self.resultTask.cancel()
-                self.interaction.cancel(TFYSwiftRouteError.timeout)
-            }
+            operation: { try await self.resultState.value() },
+            onTimeout: { self.cancel(with: TFYSwiftRouteError.timeout) }
         )
     }
 
-    /// 取消结果等待并按当前对象职责关闭交互资源；不等同于自动关闭 UI。
+    /// 以 cancelled 结束整个会话、唤醒所有等待者并关闭通信流；不自动关闭 UI。
+    /// 保留已向会话发布的最终结果；尚未发布的底层任务结果可能晚于本次取消。
+    /// 重复调用不会替换已发布的终态。
     public func cancel() {
+        cancel(with: TFYSwiftRouteError.cancelled)
+    }
+
+    private func cancel(with error: Error) {
+        // Publish the terminal error before asking the producer to stop. A custom
+        // resultTask may ignore cancellation, and must not hold subscribers hostage.
+        resultState.finish(.failure(error))
+        interaction.cancel(error)
         resultTask.cancel()
-        interaction.cancel()
+    }
+}
+
+/// Main-actor serialization covers registration, completion, and subscription removal.
+/// Cancellation handlers only enqueue short removals; they never await resultTask.value.
+@MainActor
+private final class TFYSwiftSessionResultState<Output: Sendable> {
+    private var result: Result<Output, Error>?
+    private var waiters: [UUID: CheckedContinuation<Output, Error>] = [:]
+
+    var isFinished: Bool { result != nil }
+
+    @discardableResult
+    func finish(_ result: Result<Output, Error>) -> Bool {
+        guard self.result == nil else { return false }
+        self.result = result
+        let continuations = Array(waiters.values)
+        waiters.removeAll()
+        for continuation in continuations { continuation.resume(with: result) }
+        return true
+    }
+
+    func value() async throws -> Output {
+        let id = UUID()
+        return try await withTaskCancellationHandler {
+            // Handles cancellation before the continuation has been registered,
+            // including reads of an already cached result from a cancelled task.
+            try checkCancellation()
+            do {
+                let value: Output = try await withCheckedThrowingContinuation { continuation in
+                    if let result {
+                        continuation.resume(with: result)
+                    } else {
+                        waiters[id] = continuation
+                    }
+                }
+                // Cancellation can precede result delivery while its main-actor
+                // cleanup is still queued. The cancelled subscriber still exits
+                // with cancelled; the shared terminal result remains untouched.
+                try checkCancellation()
+                return value
+            } catch {
+                try checkCancellation()
+                throw error
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.waiters.removeValue(forKey: id)?.resume(throwing: TFYSwiftRouteError.cancelled)
+            }
+        }
+    }
+
+    private func checkCancellation() throws {
+        if Task.isCancelled { throw TFYSwiftRouteError.cancelled }
     }
 }
 
@@ -376,28 +451,32 @@ enum TFYSwiftTimeout {
         operation: @escaping @MainActor @Sendable () async throws -> Value,
         onTimeout: @escaping @MainActor @Sendable () -> Void = {}
     ) async throws -> Value {
-        try await withThrowingTaskGroup(of: Outcome<Value>.self) { group in
-            group.addTask { .value(try await operation()) }
-            group.addTask {
-                let maximumSeconds = Double(UInt64.max / 1_000_000_000)
-                let finiteTimeout = timeout.isNaN ? 0 : timeout
-                let seconds = min(max(0, finiteTimeout), maximumSeconds)
-                let nanoseconds = UInt64(seconds * 1_000_000_000)
-                try await Task.sleep(nanoseconds: nanoseconds)
-                return .timedOut
+        if Task.isCancelled { throw TFYSwiftRouteError.cancelled }
+        do {
+            return try await withThrowingTaskGroup(of: Outcome<Value>.self) { group in
+                defer { group.cancelAll() }
+                group.addTask { .value(try await operation()) }
+                group.addTask {
+                    let maximumSeconds = Double(UInt64.max / 1_000_000_000)
+                    let finiteTimeout = timeout.isNaN ? 0 : timeout
+                    let seconds = min(max(0, finiteTimeout), maximumSeconds)
+                    let nanoseconds = UInt64(seconds * 1_000_000_000)
+                    try await Task.sleep(nanoseconds: nanoseconds)
+                    return .timedOut
+                }
+                guard let first = try await group.next(), !Task.isCancelled else {
+                    throw TFYSwiftRouteError.cancelled
+                }
+                switch first {
+                case .value(let value):
+                    return value
+                case .timedOut:
+                    onTimeout()
+                    throw TFYSwiftRouteError.timeout
+                }
             }
-            guard let first = try await group.next() else {
-                throw TFYSwiftRouteError.cancelled
-            }
-            switch first {
-            case .value(let value):
-                group.cancelAll()
-                return value
-            case .timedOut:
-                onTimeout()
-                group.cancelAll()
-                throw TFYSwiftRouteError.timeout
-            }
+        } catch is CancellationError {
+            throw TFYSwiftRouteError.cancelled
         }
     }
 }

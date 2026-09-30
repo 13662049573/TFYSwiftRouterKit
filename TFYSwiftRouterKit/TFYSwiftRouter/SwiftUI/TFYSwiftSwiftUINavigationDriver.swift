@@ -145,6 +145,8 @@ public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNa
     @Published public private(set) var sheet: TFYSwiftSwiftUINavigationEntry?
     /// 当前全屏条目；设为 nil 表示请求关闭。
     @Published public private(set) var fullScreen: TFYSwiftSwiftUINavigationEntry?
+    /// 恢复检查点存续期间暂时禁止宿主接收用户导航操作。
+    @Published public private(set) var isRestoringNavigation = false
 
     /// 平台页面工厂注册表。
     public let destinations: TFYSwiftSwiftUIDestinationRegistry
@@ -152,6 +154,7 @@ public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNa
     private var newWindowPresentation: CustomPresentation?
     private struct CheckpointState {
         let id: UUID
+        let restorationID: UUID
         let rootEntry: TFYSwiftSwiftUINavigationEntry?
         let path: [TFYSwiftSwiftUINavigationEntry]
     }
@@ -178,6 +181,7 @@ public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNa
         }
     }
     private var checkpointState: CheckpointState?
+    private var activeMutationCount = 0
 
     /// 创建原生导航状态；可注入共享工厂表或使用默认空表。
     public init(destinations: TFYSwiftSwiftUIDestinationRegistry) {
@@ -206,19 +210,25 @@ public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNa
         transaction: TFYSwiftRouteTransaction,
         interaction: TFYSwiftRouteInteraction?
     ) async throws {
-        guard destinations.contains(destination.identifier) else {
-            throw TFYSwiftRouteError.destinationNotRegistered(destination.identifier)
-        }
-        if checkpointState != nil {
+        if let checkpoint = checkpointState {
+            guard checkpoint.restorationID == TFYSwiftNavigationOperationContext.restorationID,
+                  transaction.context.source == .restoration else {
+                throw TFYSwiftRouteError.restorationFailed("SwiftUI 导航正在恢复，暂不接受其他导航操作")
+            }
             guard sheet == nil, fullScreen == nil else {
                 throw TFYSwiftRouteError.restorationFailed("恢复期间出现了新的模态页面")
             }
             switch transaction.presentation {
-            case .automatic, .push, .replace, .root: break
+            case .push, .root: break
             default:
                 throw TFYSwiftRouteError.restorationFailed("恢复检查点只支持 root/push 导航")
             }
         }
+        guard destinations.contains(destination.identifier) else {
+            throw TFYSwiftRouteError.destinationNotRegistered(destination.identifier)
+        }
+        activeMutationCount += 1
+        defer { activeMutationCount -= 1 }
         var entry = TFYSwiftSwiftUINavigationEntry(
             destination: destination,
             route: route,
@@ -273,6 +283,8 @@ public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNa
 
     /// 尝试激活已有地址；命中时返回 true，并按驱动语义移除其上的页面。
     public func activate(_ route: TFYSwiftAnyRoute, in scope: TFYSwiftNavigationScopeID) async throws -> Bool {
+        try requireUnreservedNavigation()
+        if isTop(route, in: scope) { return true }
         if fullScreen?.route == route { return true }
         if sheet?.route == route {
             fullScreen?.interaction?.cancel()
@@ -316,22 +328,36 @@ public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNa
     }
 
     /// 保存当前 root/path 页面实例；存在模态页面时拒绝开始恢复。
+    /// 必须在 Router.withNavigationRestoration 的拥有者上下文内创建、提交或回滚。
     public func makeNavigationCheckpoint(
         in scope: TFYSwiftNavigationScopeID
     ) throws -> any TFYSwiftNavigationCheckpoint {
+        guard let restorationID = TFYSwiftNavigationOperationContext.restorationID else {
+            throw TFYSwiftRouteError.restorationFailed("请在 Router.withNavigationRestoration 内创建导航检查点")
+        }
         guard checkpointState == nil else {
             throw TFYSwiftRouteError.restorationFailed("SwiftUI 导航已有未完成的恢复事务")
         }
         guard sheet == nil, fullScreen == nil else {
             throw TFYSwiftRouteError.restorationFailed("恢复前请先关闭当前 Scope 的模态页面")
         }
+        guard activeMutationCount == 0 else {
+            throw TFYSwiftRouteError.restorationFailed("SwiftUI 导航操作尚未结束，不能开始恢复")
+        }
         let id = UUID()
-        checkpointState = CheckpointState(id: id, rootEntry: rootEntry, path: path)
+        checkpointState = CheckpointState(
+            id: id,
+            restorationID: restorationID,
+            rootEntry: rootEntry,
+            path: path
+        )
+        isRestoringNavigation = true
         return Checkpoint(driver: self, id: id)
     }
 
     /// 回退指定层数；至少回退一层，最多回到当前容器根页。
     public func back(count: Int, in scope: TFYSwiftNavigationScopeID) async throws {
+        try requireUnreservedNavigation()
         guard !path.isEmpty else { throw TFYSwiftRouteError.presentationFailed("已位于根页面") }
         let removeCount = min(max(1, count), path.count)
         let removed = Array(path.suffix(removeCount))
@@ -341,12 +367,14 @@ public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNa
 
     /// 清理当前导航栈的根页之后的页面及其交互。
     public func backToRoot(in scope: TFYSwiftNavigationScopeID) async throws {
+        try requireUnreservedNavigation()
         cancel(entries: path)
         path.removeAll()
     }
 
     /// 关闭当前 Scope 的顶层模态页面；没有可关闭页面时可能抛错。
     public func dismiss(in scope: TFYSwiftNavigationScopeID) async throws {
+        try requireUnreservedNavigation()
         if let fullScreen {
             fullScreen.interaction?.cancel()
             self.fullScreen = nil
@@ -360,6 +388,7 @@ public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNa
 
     /// 关闭当前 Scope 的全部模态页面及其交互。
     public func dismissAll(in scope: TFYSwiftNavigationScopeID) async throws {
+        try requireUnreservedNavigation()
         fullScreen?.interaction?.cancel()
         sheet?.interaction?.cancel()
         fullScreen = nil
@@ -368,11 +397,11 @@ public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNa
 
     /// 接收 NavigationStack 的用户回退结果，并取消已从路径中移除的交互。
     func updatePath(_ newPath: [TFYSwiftSwiftUINavigationEntry]) {
+        // A stale NavigationStack binding update must not replace the reserved stack or
+        // cancel a result session that the checkpoint may need to restore.
+        guard checkpointState == nil else { return }
         let retainedIDs = Set(newPath.map(\.id))
-        let protectedIDs = Set(checkpointState?.path.map(\.id) ?? [])
-        cancel(entries: path.filter {
-            !retainedIDs.contains($0.id) && !protectedIDs.contains($0.id)
-        })
+        cancel(entries: path.filter { !retainedIDs.contains($0.id) })
         path = newPath
     }
 
@@ -388,6 +417,12 @@ public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNa
         guard fullScreen?.id == id else { return }
         fullScreen?.interaction?.cancel()
         fullScreen = nil
+    }
+
+    private func requireUnreservedNavigation() throws {
+        guard checkpointState == nil else {
+            throw TFYSwiftRouteError.restorationFailed("SwiftUI 导航正在恢复，暂不接受其他导航操作")
+        }
     }
 
     private func cancel(entries: [TFYSwiftSwiftUINavigationEntry]) {
@@ -408,6 +443,7 @@ public final class TFYSwiftSwiftUINavigationDriver: ObservableObject, TFYSwiftNa
             path = checkpoint.path
         }
         checkpointState = nil
+        isRestoringNavigation = false
     }
 }
 
@@ -445,6 +481,8 @@ public struct TFYSwiftSwiftUIRouterHost<Root: View>: View {
             }
             .navigationDestination(for: TFYSwiftSwiftUINavigationEntry.self) { destination($0) }
         }
+        .allowsHitTesting(!driver.isRestoringNavigation)
+        .disabled(driver.isRestoringNavigation)
         .sheet(
             item: Binding(get: { driver.sheet }, set: {
                 if $0 == nil, let presentedSheetID {

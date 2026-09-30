@@ -157,8 +157,16 @@ public final class TFYSwiftRouteEventCenter {
 public final class TFYSwiftRouteHistory: TFYSwiftRouteObserver {
     /// 事件中心、历史记录或会话事件流；具体语义由所属类型决定。
     public private(set) var events: [TFYSwiftRouteEvent] = []
-    /// 最多保留的事件条数；设置时应使用正数。
-    public var capacity: Int
+    /// 最多保留的事件条数；始终归一化为至少 1，缩小时立即保留最新事件。
+    public var capacity: Int {
+        didSet {
+            capacity = max(1, capacity)
+            if events.count > capacity {
+                events.removeFirst(events.count - capacity)
+                onChange?()
+            }
+        }
+    }
     /// 历史更新/清空后的主线程回调，可用于刷新 Inspector。
     public var onChange: (() -> Void)?
 

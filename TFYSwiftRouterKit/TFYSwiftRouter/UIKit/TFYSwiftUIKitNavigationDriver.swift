@@ -37,7 +37,13 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
     private let navigationDelegateObserver = TFYSwiftNavigationDelegateObserver()
     private struct CheckpointState {
         let id: UUID
+        let restorationID: UUID
         let viewControllers: [UIViewController]
+        var expectedViewControllers: [UIViewController]
+        let navigationView: UIView
+        let wasUserInteractionEnabled: Bool
+        let interactivePopGestureRecognizer: UIGestureRecognizer?
+        let wasInteractivePopEnabled: Bool?
     }
     private final class Checkpoint: TFYSwiftNavigationCheckpoint {
         private weak var driver: TFYSwiftUIKitNavigationDriver?
@@ -62,6 +68,8 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
         }
     }
     private var checkpointState: CheckpointState?
+    private var activeMutationCount = 0
+    private var isReconcilingCheckpoint = false
 
     /// 注入导航容器与页面工厂表；便利初始化器创建空表，容器由 App 强持有。
     public init(
@@ -107,17 +115,23 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
             throw TFYSwiftRouteError.scopeUnavailable(transaction.context.scope.rawValue)
         }
         installNavigationDelegateObserver()
-        if checkpointState != nil {
+        if let checkpoint = checkpointState {
+            guard checkpoint.restorationID == TFYSwiftNavigationOperationContext.restorationID,
+                  transaction.context.source == .restoration else {
+                throw TFYSwiftRouteError.restorationFailed("UIKit 导航正在恢复，暂不接受其他导航操作")
+            }
             guard navigationController.presentedViewController == nil else {
                 throw TFYSwiftRouteError.restorationFailed("恢复期间出现了新的模态页面")
             }
             switch transaction.presentation {
-            case .automatic, .push, .replace, .root: break
+            case .push, .root: break
             default:
                 throw TFYSwiftRouteError.restorationFailed("恢复检查点只支持 root/push 导航")
             }
         }
 
+        activeMutationCount += 1
+        defer { activeMutationCount -= 1 }
         let context = TFYSwiftDestinationContext(
             routeContext: transaction.context,
             presentation: transaction.presentation,
@@ -141,10 +155,12 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
         switch transaction.presentation {
         case .automatic:
             trackedController.isNavigationStackEntry = true
+            checkpointState?.expectedViewControllers = navigationController.viewControllers + [viewController]
             navigationController.pushViewController(viewController, animated: true)
             await navigationController.awaitTransitionCompletion()
         case .push(let animated):
             trackedController.isNavigationStackEntry = true
+            checkpointState?.expectedViewControllers = navigationController.viewControllers + [viewController]
             navigationController.pushViewController(viewController, animated: animated)
             await navigationController.awaitTransitionCompletion()
         case .sheet(let configuration):
@@ -164,6 +180,7 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
             } else {
                 stack[stack.count - 1] = viewController
             }
+            checkpointState?.expectedViewControllers = stack
             navigationController.setViewControllers(stack, animated: animated)
             await navigationController.awaitTransitionCompletion()
             if checkpointState == nil, let replacedController {
@@ -177,6 +194,7 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
                 await navigationController.dismissAwaitingCompletion(animated: false)
             }
             let previousControllers = navigationController.viewControllers
+            checkpointState?.expectedViewControllers = [viewController]
             navigationController.setViewControllers([viewController], animated: animated)
             await navigationController.awaitTransitionCompletion()
             presentedControllers.forEach(cancelInteraction(of:))
@@ -203,6 +221,9 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
 
     /// 尝试激活已有地址；命中时返回 true，并按驱动语义移除其上的页面。
     public func activate(_ route: TFYSwiftAnyRoute, in scope: TFYSwiftNavigationScopeID) async throws -> Bool {
+        try requireUnreservedNavigation()
+        activeMutationCount += 1
+        defer { activeMutationCount -= 1 }
         guard let navigationController else { return false }
         pruneTrackedControllers()
         if self.route(for: topViewController(from: navigationController)) == route { return true }
@@ -240,9 +261,13 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
     }
 
     /// 保存当前导航控制器中的页面实例；存在子模态页面时拒绝开始恢复。
+    /// 必须在 Router.withNavigationRestoration 的拥有者上下文内创建、提交或回滚。
     public func makeNavigationCheckpoint(
         in scope: TFYSwiftNavigationScopeID
     ) throws -> any TFYSwiftNavigationCheckpoint {
+        guard let restorationID = TFYSwiftNavigationOperationContext.restorationID else {
+            throw TFYSwiftRouteError.restorationFailed("请在 Router.withNavigationRestoration 内创建导航检查点")
+        }
         guard checkpointState == nil else {
             throw TFYSwiftRouteError.restorationFailed("UIKit 导航已有未完成的恢复事务")
         }
@@ -252,16 +277,33 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
         guard navigationController.presentedViewController == nil else {
             throw TFYSwiftRouteError.restorationFailed("恢复前请先关闭当前 Scope 的模态页面")
         }
+        guard activeMutationCount == 0, navigationController.transitionCoordinator == nil else {
+            throw TFYSwiftRouteError.restorationFailed("UIKit 导航转场尚未结束，不能开始恢复")
+        }
+        installNavigationDelegateObserver()
         let id = UUID()
+        let navigationView = navigationController.view!
+        let popGesture = navigationController.interactivePopGestureRecognizer
         checkpointState = CheckpointState(
             id: id,
-            viewControllers: navigationController.viewControllers
+            restorationID: restorationID,
+            viewControllers: navigationController.viewControllers,
+            expectedViewControllers: navigationController.viewControllers,
+            navigationView: navigationView,
+            wasUserInteractionEnabled: navigationView.isUserInteractionEnabled,
+            interactivePopGestureRecognizer: popGesture,
+            wasInteractivePopEnabled: popGesture?.isEnabled
         )
+        navigationView.isUserInteractionEnabled = false
+        popGesture?.isEnabled = false
         return Checkpoint(driver: self, id: id)
     }
 
     /// 回退指定层数；至少回退一层，最多回到当前容器根页。
     public func back(count: Int, in scope: TFYSwiftNavigationScopeID) async throws {
+        try requireUnreservedNavigation()
+        activeMutationCount += 1
+        defer { activeMutationCount -= 1 }
         guard let navigationController else { throw TFYSwiftRouteError.scopeUnavailable(scope.rawValue) }
         let stack = navigationController.viewControllers
         guard stack.count > 1 else { throw TFYSwiftRouteError.presentationFailed("已位于根页面") }
@@ -274,6 +316,9 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
 
     /// 清理当前导航栈的根页之后的页面及其交互。
     public func backToRoot(in scope: TFYSwiftNavigationScopeID) async throws {
+        try requireUnreservedNavigation()
+        activeMutationCount += 1
+        defer { activeMutationCount -= 1 }
         guard let navigationController else { throw TFYSwiftRouteError.scopeUnavailable(scope.rawValue) }
         let removed = Array(navigationController.viewControllers.dropFirst())
         navigationController.popToRootViewController(animated: true)
@@ -283,6 +328,9 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
 
     /// 关闭当前 Scope 的顶层模态页面；没有可关闭页面时可能抛错。
     public func dismiss(in scope: TFYSwiftNavigationScopeID) async throws {
+        try requireUnreservedNavigation()
+        activeMutationCount += 1
+        defer { activeMutationCount -= 1 }
         guard let navigationController else { throw TFYSwiftRouteError.scopeUnavailable(scope.rawValue) }
         let source = topViewController(from: navigationController)
         guard source.presentingViewController != nil || navigationController.presentedViewController != nil else {
@@ -294,6 +342,9 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
 
     /// 关闭当前 Scope 的全部模态页面及其交互。
     public func dismissAll(in scope: TFYSwiftNavigationScopeID) async throws {
+        try requireUnreservedNavigation()
+        activeMutationCount += 1
+        defer { activeMutationCount -= 1 }
         guard let navigationController else { throw TFYSwiftRouteError.scopeUnavailable(scope.rawValue) }
         let presentedControllers = presentedHierarchy(from: navigationController)
         guard !presentedControllers.isEmpty else { return }
@@ -346,7 +397,19 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
     }
 
     private func navigationControllerDidShow(_ navigationController: UINavigationController) {
-        if checkpointState != nil {
+        if let checkpoint = checkpointState {
+            checkpoint.navigationView.isUserInteractionEnabled = false
+            checkpoint.interactivePopGestureRecognizer?.isEnabled = false
+            // UIKit delegate callbacks can outlive their initiating task. Compare page identity,
+            // rather than a task-local token, to reject direct pops while restoration is suspended.
+            guard !isReconcilingCheckpoint else { return }
+            let expected = checkpoint.expectedViewControllers
+            if navigationController.viewControllers.map(ObjectIdentifier.init)
+                != expected.map(ObjectIdentifier.init) {
+                isReconcilingCheckpoint = true
+                navigationController.setViewControllers(expected, animated: false)
+                isReconcilingCheckpoint = false
+            }
             pruneTrackedControllers()
             return
         }
@@ -412,9 +475,24 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
         }
     }
 
+    private func requireUnreservedNavigation() throws {
+        guard checkpointState == nil else {
+            throw TFYSwiftRouteError.restorationFailed("UIKit 导航正在恢复，暂不接受其他导航操作")
+        }
+    }
+
     private func resolveCheckpoint(id: UUID, commit: Bool) {
-        guard let checkpoint = checkpointState, checkpoint.id == id,
-              let navigationController else { return }
+        guard let checkpoint = checkpointState, checkpoint.id == id else { return }
+        defer {
+            checkpointState = nil
+            checkpoint.navigationView.isUserInteractionEnabled = checkpoint.wasUserInteractionEnabled
+            if let wasEnabled = checkpoint.wasInteractivePopEnabled {
+                checkpoint.interactivePopGestureRecognizer?.isEnabled = wasEnabled
+            }
+            if let navigationController { navigationControllerDidShow(navigationController) }
+        }
+        guard let navigationController else { return }
+        navigationControllerDidShow(navigationController)
         let previousIDs = Set(checkpoint.viewControllers.map(ObjectIdentifier.init))
         let currentControllers = navigationController.viewControllers
         let currentIDs = Set(currentControllers.map(ObjectIdentifier.init))
@@ -426,10 +504,9 @@ public final class TFYSwiftUIKitNavigationDriver: NSObject, TFYSwiftNavigationDr
             currentControllers
                 .filter { !previousIDs.contains(ObjectIdentifier($0)) }
                 .forEach(cancelInteraction(of:))
+            checkpointState?.expectedViewControllers = checkpoint.viewControllers
             navigationController.setViewControllers(checkpoint.viewControllers, animated: false)
         }
-        checkpointState = nil
-        navigationControllerDidShow(navigationController)
     }
 
     private func topViewController(from root: UIViewController) -> UIViewController {

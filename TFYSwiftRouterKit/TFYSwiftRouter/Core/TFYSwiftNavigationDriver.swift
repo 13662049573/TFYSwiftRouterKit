@@ -110,6 +110,9 @@ public protocol TFYSwiftNavigationCheckpoint: AnyObject {
 
 @MainActor
 /// 支持原页面实例级回滚的导航驱动；状态恢复只接受实现此协议的驱动。
+/// 检查点应在 Router.withNavigationRestoration 内使用，并在创建时捕获
+/// TFYSwiftNavigationOperationContext.restorationID。驱动负责拒绝无关任务和
+/// 平台手势对保留栈的修改，原交互资源仅在提交后清理。
 public protocol TFYSwiftNavigationCheckpointing: TFYSwiftNavigationDriver {
     func makeNavigationCheckpoint(
         in scope: TFYSwiftNavigationScopeID

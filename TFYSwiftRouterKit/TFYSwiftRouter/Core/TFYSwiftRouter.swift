@@ -211,6 +211,8 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
     private var executionTasks: [UUID: Task<Void, Never>] = [:]
     private var transactionOrder: [UUID] = []
     private var activeTransactions: [UUID: TFYSwiftRouteTransaction] = [:]
+    private var commitGates: [TFYSwiftNavigationScopeID: TFYSwiftNavigationCommitGate] = [:]
+    private var restorationOwners: [TFYSwiftNavigationScopeID: UUID] = [:]
 
     /// 注入驱动与可选的完整基础设施；便利初始化器自动创建注册表、事件中心与拦截流水线。
     public init(
@@ -520,22 +522,30 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
 
     /// 回退指定层数；至少回退一层，最多回到当前容器根页。
     public func back(count: Int = 1, scope: TFYSwiftNavigationScopeID) async throws {
-        try await driver.back(count: max(1, count), in: scope)
+        try await performNavigationMutation(in: scope) {
+            try await self.driver.back(count: max(1, count), in: scope)
+        }
     }
 
     /// 清理当前导航栈的根页之后的页面及其交互。
     public func backToRoot(scope: TFYSwiftNavigationScopeID) async throws {
-        try await driver.backToRoot(in: scope)
+        try await performNavigationMutation(in: scope) {
+            try await self.driver.backToRoot(in: scope)
+        }
     }
 
     /// 关闭当前 Scope 的顶层模态页面；没有可关闭页面时可能抛错。
     public func dismiss(scope: TFYSwiftNavigationScopeID) async throws {
-        try await driver.dismiss(in: scope)
+        try await performNavigationMutation(in: scope) {
+            try await self.driver.dismiss(in: scope)
+        }
     }
 
     /// 关闭当前 Scope 的全部模态页面及其交互。
     public func dismissAll(scope: TFYSwiftNavigationScopeID) async throws {
-        try await driver.dismissAll(in: scope)
+        try await performNavigationMutation(in: scope) {
+            try await self.driver.dismissAll(in: scope)
+        }
     }
 
     /// 返回当前驱动追踪的地址，包含受支持的模态页面。
@@ -546,6 +556,58 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
     /// 返回可用于恢复的 root/push 地址顺序；内置驱动排除模态和自定义呈现。
     public func navigationRoutes(scope: TFYSwiftNavigationScopeID? = nil) -> [TFYSwiftAnyRoute] {
         driver.navigationRoutes(in: scope ?? defaultScope)
+    }
+
+    /// Runs checkpoint creation, replay and resolution under one restoration owner.
+    /// All affected scopes are reserved atomically. Conflicting navigation and
+    /// overlapping restorations fail explicitly; no lock is held across login
+    /// interceptors or asynchronous destination resolution for ordinary requests.
+    public func withNavigationRestoration<Value: Sendable>(
+        scopes: [TFYSwiftNavigationScopeID],
+        operation: @MainActor () async throws -> Value
+    ) async throws -> Value {
+        try Task.checkCancellation()
+        let scopes = Set(scopes)
+        guard scopes.allSatisfy({ restorationOwners[$0] == nil && commitGates[$0]?.isBusy != true }) else {
+            throw TFYSwiftRouteError.restorationFailed("目标 Scope 正在导航或恢复，请在当前操作结束后重试")
+        }
+        let owner = UUID()
+        for scope in scopes { restorationOwners[scope] = owner }
+        defer {
+            for scope in scopes { restorationOwners.removeValue(forKey: scope) }
+        }
+        return try await TFYSwiftNavigationOperationContext.$restorationToken.withValue(owner) {
+            try await operation()
+        }
+    }
+
+    private func commitGate(in scope: TFYSwiftNavigationScopeID) -> TFYSwiftNavigationCommitGate {
+        if let gate = commitGates[scope] { return gate }
+        let gate = TFYSwiftNavigationCommitGate()
+        commitGates[scope] = gate
+        return gate
+    }
+
+    private func validateNavigationAccess(
+        in scope: TFYSwiftNavigationScopeID,
+        source: TFYSwiftRouteSource? = nil
+    ) throws {
+        guard let owner = restorationOwners[scope] else { return }
+        guard source == .restoration,
+              TFYSwiftNavigationOperationContext.restorationID == owner else {
+            throw TFYSwiftRouteError.restorationFailed("Scope \(scope.rawValue) 正在恢复，暂不接受其他导航")
+        }
+    }
+
+    private func performNavigationMutation(
+        in scope: TFYSwiftNavigationScopeID,
+        operation: @MainActor () async throws -> Void
+    ) async throws {
+        try validateNavigationAccess(in: scope)
+        try await commitGate(in: scope).perform {
+            try self.validateNavigationAccess(in: scope)
+            try await operation()
+        }
     }
 
     private func makeTransaction(
@@ -573,6 +635,7 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
         interaction: TFYSwiftRouteInteraction?
     ) async throws -> TFYSwiftRouteTransaction {
         var transaction = originalTransaction
+        try validateNavigationAccess(in: transaction.context.scope, source: transaction.context.source)
         var redirects = 0
         var suspensions = 0
 
@@ -608,47 +671,73 @@ public final class TFYSwiftRouter: TFYSwiftRouting {
         }
 
         try Task.checkCancellation()
-        switch transaction.deduplication {
-        case .ignoreIfTop where driver.isTop(transaction.route, in: transaction.context.scope):
-            if interaction != nil { throw TFYSwiftRouteError.destinationUnavailable("去重策略复用已有页面时无法绑定新的交互") }
-            emit(transaction, .deduplicated, message: "ignoreIfTop")
-            return transaction
-        case .singleTop where driver.isTop(transaction.route, in: transaction.context.scope):
-            if interaction != nil { throw TFYSwiftRouteError.destinationUnavailable("去重策略复用已有页面时无法绑定新的交互") }
-            emit(transaction, .deduplicated, message: "singleTop")
-            return transaction
-        case .singleTask:
-            if interaction != nil {
-                if driver.routes(in: transaction.context.scope).contains(transaction.route) {
-                    throw TFYSwiftRouteError.destinationUnavailable("复用已有页面时无法绑定新的交互")
-                }
-                break
-            }
-            if try await driver.activate(transaction.route, in: transaction.context.scope) {
-                emit(transaction, .deduplicated, message: "singleTask")
-                return transaction
-            }
-        case .none, .ignoreIfTop, .singleTop:
-            break
-        }
+        let scope = transaction.context.scope
+        try validateNavigationAccess(in: scope, source: transaction.context.source)
+        // Keep the fast path for an already visible destination, but serialize
+        // activation too because a custom driver may suspend while activating.
+        if try await commitGate(in: scope).perform({
+            try self.validateNavigationAccess(in: scope, source: transaction.context.source)
+            return try await self.deduplicate(transaction, interaction: interaction)
+        }) { return transaction }
 
         transition(transaction, to: .resolving, event: nil)
         let destination = try await registry.resolve(transaction.route, context: transaction.context)
         try Task.checkCancellation()
+        try validateNavigationAccess(in: scope, source: transaction.context.source)
         transaction.destinationID = destination.identifier
         activeTransactions[transaction.id] = transaction
         emit(transaction, .resolved, message: destination.identifier)
-        transition(transaction, to: .presenting, event: .presentStarted)
+
+        return try await commitGate(in: scope).perform {
+            try self.validateNavigationAccess(in: scope, source: transaction.context.source)
+            // Resolution suspends: repeat the check while owning the commit gate.
+            // Hold it through present(), including asynchronous custom drivers.
+            if try await self.deduplicate(transaction, interaction: interaction) { return transaction }
+            try Task.checkCancellation()
+            self.transition(transaction, to: .presenting, event: .presentStarted)
+            try await self.driver.present(
+                destination: destination,
+                route: transaction.route,
+                transaction: transaction,
+                interaction: interaction
+            )
+            try Task.checkCancellation()
+            self.transition(transaction, to: .presented, event: .presented)
+            return transaction
+        }
+    }
+
+    private func deduplicate(
+        _ transaction: TFYSwiftRouteTransaction,
+        interaction: TFYSwiftRouteInteraction?
+    ) async throws -> Bool {
+        let scope = transaction.context.scope
+        switch transaction.deduplication {
+        case .ignoreIfTop, .singleTop:
+            guard driver.isTop(transaction.route, in: scope) else { return false }
+            guard interaction == nil else {
+                throw TFYSwiftRouteError.destinationUnavailable("去重策略复用已有页面时无法绑定新的交互")
+            }
+            // ignoreIfTop remains the documented compatibility alias of singleTop.
+            // Activation also selects a hidden tab without pushing a duplicate.
+            let activated = try await driver.activate(transaction.route, in: scope)
+            // Legacy custom drivers may have a no-op activate implementation.
+            // Preserve reuse if the target is still top after the awaited call.
+            guard activated || driver.isTop(transaction.route, in: scope) else { return false }
+        case .singleTask:
+            if interaction != nil {
+                if driver.routes(in: scope).contains(transaction.route) {
+                    throw TFYSwiftRouteError.destinationUnavailable("复用已有页面时无法绑定新的交互")
+                }
+                return false
+            }
+            guard try await driver.activate(transaction.route, in: scope) else { return false }
+        case .none:
+            return false
+        }
         try Task.checkCancellation()
-        try await driver.present(
-            destination: destination,
-            route: transaction.route,
-            transaction: transaction,
-            interaction: interaction
-        )
-        try Task.checkCancellation()
-        transition(transaction, to: .presented, event: .presented)
-        return transaction
+        emit(transaction, .deduplicated, message: transaction.deduplication.rawValue)
+        return true
     }
 
     private func transition(
